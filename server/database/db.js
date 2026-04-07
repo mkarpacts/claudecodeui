@@ -173,6 +173,17 @@ const runMigrations = () => {
       console.error('[MIGRATION] Failed to add cost_usd column to usage_log:', err.message);
     }
 
+    // Migration: create session_ownership table for multi-user session isolation
+    db.exec(`CREATE TABLE IF NOT EXISTS session_ownership (
+      session_id TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'claude',
+      user_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(session_id, provider),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_session_ownership_user ON session_ownership(user_id, provider)');
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -648,6 +659,22 @@ const githubTokensDb = {
   }
 };
 
+// Session ownership for multi-user session list filtering
+const sessionOwnershipDb = {
+  claim: (sessionId, provider, userId) => {
+    db.prepare(
+      'INSERT OR IGNORE INTO session_ownership (session_id, provider, user_id) VALUES (?, ?, ?)'
+    ).run(sessionId, provider, userId);
+  },
+
+  getUserSessionIds: (userId, provider) => {
+    return new Set(
+      db.prepare('SELECT session_id FROM session_ownership WHERE user_id = ? AND provider = ?')
+        .all(userId, provider).map(r => r.session_id)
+    );
+  },
+};
+
 export {
   db,
   initializeDatabase,
@@ -660,5 +687,6 @@ export {
   applyCustomSessionNames,
   appConfigDb,
   usageDb,
+  sessionOwnershipDb,
   githubTokensDb // Backward compatibility
 };
