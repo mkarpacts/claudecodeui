@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import { useAuth } from '../context/AuthContext';
@@ -12,6 +13,7 @@ type ProtectedRouteProps = {
 
 export default function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, isLoading, needsSetup, hasCompletedOnboarding, refreshOnboardingStatus } = useAuth();
+  const [showRegister, setShowRegister] = useState(false);
 
   if (isLoading) {
     return <AuthLoadingScreen />;
@@ -25,12 +27,16 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <>{children}</>;
   }
 
+  // No users yet — show register form only (no one to sign in as)
   if (needsSetup) {
     return <SetupForm />;
   }
 
   if (!user) {
-    return <LoginForm />;
+    if (showRegister) {
+      return <SetupForm onSwitchToLogin={() => setShowRegister(false)} />;
+    }
+    return <LoginForm onSwitchToRegister={() => setShowRegister(true)} />;
   }
 
   if (!hasCompletedOnboarding) {

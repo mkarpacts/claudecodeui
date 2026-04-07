@@ -26,7 +26,7 @@ import {
 } from './services/notification-orchestrator.js';
 import { claudeAdapter } from './providers/claude/adapter.js';
 import { createNormalizedMessage } from './providers/types.js';
-import { usageDb } from './database/db.js';
+import { usageDb, sessionOwnershipDb } from './database/db.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -630,6 +630,15 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
         capturedSessionId = message.session_id;
         addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
+
+        // Record session ownership for multi-user session list filtering
+        if (ws.userId) {
+          try {
+            sessionOwnershipDb.claim(capturedSessionId, 'claude', ws.userId);
+          } catch (e) {
+            console.warn('[SESSION] Failed to record ownership:', e.message);
+          }
+        }
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {

@@ -69,11 +69,30 @@ import messagesRoutes from './routes/messages.js';
 import usageRoutes from './routes/usage.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
-import { initializeDatabase, sessionNamesDb, applyCustomSessionNames } from './database/db.js';
+import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb } from './database/db.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { getConnectableHost } from '../shared/networkHosts.js';
+
+/**
+ * Filter projects to show only sessions owned by userId.
+ * Projects with no sessions (empty workspaces) remain visible to everyone.
+ * Returns new array — never mutates the input.
+ */
+function filterProjectsByOwner(projects, ownedIds) {
+    const result = [];
+    for (const project of projects) {
+        if (!project.sessions) { result.push(project); continue; }
+        const beforeCount = project.sessions.length;
+        const filtered = project.sessions.filter(s => ownedIds.has(s.id));
+        const hasMore = Boolean(project.sessionMeta?.hasMore);
+        if (filtered.length > 0 || hasMore || beforeCount === 0) {
+            result.push({ ...project, sessions: filtered, sessionMeta: { hasMore, total: filtered.length } });
+        }
+    }
+    return result;
+}
 
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
 
@@ -153,20 +172,34 @@ async function setupProjectsWatcher() {
                 // Get updated projects list
                 const updatedProjects = await getProjects(broadcastProgress);
 
-                // Notify all connected clients about the project changes
-                const updateMessage = JSON.stringify({
-                    type: 'projects_updated',
-                    projects: updatedProjects,
-                    timestamp: new Date().toISOString(),
-                    changeType: eventType,
-                    changedFile: path.relative(rootPath, filePath),
-                    watchProvider: provider
+                // Notify all connected clients about the project changes (filtered per user)
+                const timestamp = new Date().toISOString();
+                const changedFile = path.relative(rootPath, filePath);
+
+                // Group clients by userId → one DB query + one JSON.stringify per unique user
+                const clientsByUser = new Map();
+                connectedClients.forEach(client => {
+                    if (client.readyState !== WebSocket.OPEN) return;
+                    const uid = client._userId ?? null;
+                    if (!clientsByUser.has(uid)) clientsByUser.set(uid, []);
+                    clientsByUser.get(uid).push(client);
                 });
 
-                connectedClients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(updateMessage);
+                clientsByUser.forEach((clients, uid) => {
+                    let clientProjects = updatedProjects;
+                    if (uid !== null) {
+                        const ownedIds = sessionOwnershipDb.getUserSessionIds(uid, 'claude');
+                        clientProjects = filterProjectsByOwner(updatedProjects, ownedIds);
                     }
+                    const msg = JSON.stringify({
+                        type: 'projects_updated',
+                        projects: clientProjects,
+                        timestamp,
+                        changeType: eventType,
+                        changedFile,
+                        watchProvider: provider
+                    });
+                    clients.forEach(c => c.send(msg));
                 });
 
             } catch (error) {
@@ -501,7 +534,10 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
 app.get('/api/projects', authenticateToken, async (req, res) => {
     try {
         const projects = await getProjects(broadcastProgress);
-        res.json(projects);
+
+        // Multi-user: show only own sessions, hide projects with only other users' sessions
+        const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
+        res.json(filterProjectsByOwner(projects, ownedIds));
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -510,9 +546,19 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
     try {
         const { limit = 5, offset = 0 } = req.query;
-        const result = await getSessions(req.params.projectName, parseInt(limit), parseInt(offset));
-        applyCustomSessionNames(result.sessions, 'claude');
-        res.json(result);
+        const parsedLimit = parseInt(limit);
+        const parsedOffset = parseInt(offset);
+
+        // Load all sessions, filter to current user's, then paginate
+        const allResult = await getSessions(req.params.projectName, 999999, 0);
+        const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
+        const filtered = allResult.sessions.filter(s => ownedIds.has(s.id));
+
+        const total = filtered.length;
+        const paginatedSessions = filtered.slice(parsedOffset, parsedOffset + parsedLimit);
+
+        applyCustomSessionNames(paginatedSessions, 'claude');
+        res.json({ sessions: paginatedSessions, hasMore: parsedOffset + parsedLimit < total, total, offset: parsedOffset, limit: parsedLimit });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1483,10 +1529,12 @@ function handleChatConnection(ws, request) {
     console.log('[INFO] Chat WebSocket connected');
 
     // Add to connected clients for project updates
+    const userId = request?.user?.id ?? request?.user?.userId ?? null;
+    ws._userId = userId;
     connectedClients.add(ws);
 
     // Wrap WebSocket with writer for consistent interface with SSEStreamWriter
-    const writer = new WebSocketWriter(ws, request?.user?.id ?? request?.user?.userId ?? null);
+    const writer = new WebSocketWriter(ws, userId);
 
     ws.on('message', async (message) => {
         try {
@@ -1496,6 +1544,15 @@ function handleChatConnection(ws, request) {
                 console.log('[DEBUG] User message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.projectPath || 'Unknown');
                 console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+
+                // Block resume of another user's session
+                if (data.options?.sessionId && userId) {
+                    const ownedIds = sessionOwnershipDb.getUserSessionIds(userId, 'claude');
+                    if (ownedIds.size > 0 && !ownedIds.has(data.options.sessionId)) {
+                        writer.send({ type: 'error', error: 'You do not have access to this session.' });
+                        return;
+                    }
+                }
 
                 // Use Claude Agents SDK
                 await queryClaudeSDK(data.command, data.options, writer);

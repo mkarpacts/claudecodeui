@@ -1,7 +1,7 @@
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
 
--- Users table (single user system)
+-- Users table (multi-user system)
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
@@ -90,6 +90,18 @@ CREATE TABLE IF NOT EXISTS session_names (
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_names_lookup ON session_names(session_id, provider);
+
+-- Session ownership for multi-user isolation (which user created which session)
+CREATE TABLE IF NOT EXISTS session_ownership (
+    session_id TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'claude',
+    user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(session_id, provider),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_ownership_user ON session_ownership(user_id, provider);
 
 -- App configuration table (auto-generated secrets, settings, etc.)
 CREATE TABLE IF NOT EXISTS app_config (

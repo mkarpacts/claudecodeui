@@ -48,7 +48,11 @@ function validateSetupForm(formState: SetupFormState): string | null {
  * managers recognise this as a registration flow and offer to save the new
  * credentials after submission.
  */
-export default function SetupForm() {
+type SetupFormProps = {
+  onSwitchToLogin?: () => void;
+};
+
+export default function SetupForm({ onSwitchToLogin }: SetupFormProps) {
   const { register } = useAuth();
 
   const [formState, setFormState] = useState<SetupFormState>(initialState);
@@ -82,9 +86,9 @@ export default function SetupForm() {
 
   return (
     <AuthScreenLayout
-      title="Welcome to Claude Code UI"
-      description="Set up your account to get started"
-      footerText="This is a single-user system. Only one account can be created."
+      title="Create Account"
+      description="Register a new account to get started"
+      footerText=""
       logo={<img src="/logo.svg" alt="CloudCLI" className="h-16 w-16" />}
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -130,9 +134,23 @@ export default function SetupForm() {
           disabled={isSubmitting}
           className="w-full rounded-md bg-blue-600 px-4 py-2 font-medium text-white transition-colors duration-200 hover:bg-blue-700 disabled:bg-blue-400"
         >
-          {isSubmitting ? 'Setting up...' : 'Create Account'}
+          {isSubmitting ? 'Creating account...' : 'Create Account'}
         </button>
       </form>
+      {onSwitchToLogin && (
+        <div className="mt-4 text-center">
+          <span className="text-sm text-muted-foreground">
+            Already have an account?{' '}
+            <button
+              type="button"
+              onClick={onSwitchToLogin}
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+              Sign in
+            </button>
+          </span>
+        </div>
+      )}
     </AuthScreenLayout>
   );
 }

@@ -21,7 +21,11 @@ const initialState: LoginFormState = {
  * Handles credential input with browser autofill support (`autocomplete`
  * attributes) so that password managers can offer to fill saved credentials.
  */
-export default function LoginForm() {
+type LoginFormProps = {
+  onSwitchToRegister?: () => void;
+};
+
+export default function LoginForm({ onSwitchToRegister }: LoginFormProps) {
   const { t } = useTranslation('auth');
   const { login } = useAuth();
 
@@ -92,6 +96,20 @@ export default function LoginForm() {
           {isSubmitting ? t('login.loading') : t('login.submit')}
         </button>
       </form>
+      {onSwitchToRegister && (
+        <div className="mt-4 text-center">
+          <span className="text-sm text-muted-foreground">
+            {t('login.noAccount', "Don't have an account?")}{' '}
+            <button
+              type="button"
+              onClick={onSwitchToRegister}
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+              {t('login.createAccount', 'Create one')}
+            </button>
+          </span>
+        </div>
+      )}
     </AuthScreenLayout>
   );
 }
