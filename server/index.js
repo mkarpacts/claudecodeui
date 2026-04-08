@@ -81,17 +81,11 @@ import { getConnectableHost } from '../shared/networkHosts.js';
  * Returns new array — never mutates the input.
  */
 function filterProjectsByOwner(projects, ownedIds) {
-    const result = [];
-    for (const project of projects) {
-        if (!project.sessions) { result.push(project); continue; }
-        const beforeCount = project.sessions.length;
+    return projects.map(project => {
+        if (!project.sessions) return project;
         const filtered = project.sessions.filter(s => ownedIds.has(s.id));
-        const hasMore = Boolean(project.sessionMeta?.hasMore);
-        if (filtered.length > 0 || hasMore || beforeCount === 0) {
-            result.push({ ...project, sessions: filtered, sessionMeta: { hasMore, total: filtered.length } });
-        }
-    }
-    return result;
+        return { ...project, sessions: filtered, sessionMeta: { hasMore: Boolean(project.sessionMeta?.hasMore), total: filtered.length } };
+    });
 }
 
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
