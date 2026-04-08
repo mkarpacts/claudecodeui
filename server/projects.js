@@ -386,6 +386,7 @@ async function getProjects(progressCallback = null) {
   const config = await loadProjectConfig();
   const projects = [];
   const existingProjects = new Set();
+  const existingPaths = new Set(); // actual resolved paths — used to dedup manual projects with different encoding
   const codexSessionsIndexRef = { sessionsByProject: null };
   let totalProjects = 0;
   let processedProjects = 0;
@@ -424,6 +425,7 @@ async function getProjects(progressCallback = null) {
 
       // Extract actual project directory from JSONL sessions
       const actualProjectDir = await extractProjectDirectory(entry.name);
+      if (actualProjectDir) existingPaths.add(path.resolve(actualProjectDir));
 
       // Get display name from config or generate one
       const customName = config[entry.name]?.displayName;
@@ -528,8 +530,11 @@ async function getProjects(progressCallback = null) {
 
   // Add manually configured projects that don't exist as folders yet
   for (const [projectName, projectConfig] of Object.entries(config)) {
-    if (!existingProjects.has(projectName) && projectConfig.manuallyAdded) {
-      processedProjects++;
+    if (!projectConfig.manuallyAdded) continue;
+    const manualPath = projectConfig.originalPath ? path.resolve(projectConfig.originalPath) : null;
+    if (existingProjects.has(projectName) || (manualPath && existingPaths.has(manualPath))) continue;
+
+    processedProjects++;
 
       // Emit progress for manual projects
       if (progressCallback) {
@@ -625,8 +630,7 @@ async function getProjects(progressCallback = null) {
         };
       }
 
-      projects.push(project);
-    }
+    projects.push(project);
   }
 
   // Emit completion after all projects (including manual) are processed
@@ -1240,7 +1244,16 @@ async function addProjectManually(projectPath, displayName = null) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
   if (config[projectName]) {
-    throw new Error(`Project already configured for path: ${absolutePath}`);
+    // Already tracked — return existing project (another user may have added it)
+    return {
+      name: projectName,
+      path: absolutePath,
+      fullPath: absolutePath,
+      displayName: config[projectName].displayName || await generateDisplayName(projectName, absolutePath),
+      isManuallyAdded: true,
+      sessions: [],
+      cursorSessions: []
+    };
   }
 
   // Allow adding projects even if the directory exists - this enables tracking
