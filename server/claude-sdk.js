@@ -35,6 +35,8 @@ const TOOL_APPROVAL_TIMEOUT_MS = parseInt(process.env.CLAUDE_TOOL_APPROVAL_TIMEO
 
 const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion']);
 
+const FIRST_MESSAGE_TIMEOUT_MS = parseInt(process.env.CLAUDE_FIRST_MESSAGE_TIMEOUT_MS, 10) || 15000;
+
 function createRequestId() {
   if (typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -214,6 +216,39 @@ function mapCliOptionsToSDK(options = {}) {
   }
 
   return sdkOptions;
+}
+
+/**
+ * Waits for the first message from an async generator with a timeout.
+ * Returns the message or throws on timeout.
+ */
+function waitForFirstMessage(asyncIterator, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`SDK did not produce a message within ${timeoutMs / 1000}s`));
+      }
+    }, timeoutMs);
+
+    asyncIterator.next().then(
+      (result) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(result);
+        }
+      },
+      (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+        }
+      }
+    );
+  });
 }
 
 /**
@@ -481,14 +516,22 @@ async function queryClaudeSDK(command, options = {}, ws) {
     });
   };
 
+  const queryStartTime = Date.now();
+  const logPrefix = `[SDK:${sessionId || 'NEW'}]`;
+
   try {
     // Map CLI options to SDK format
     const sdkOptions = mapCliOptionsToSDK(options);
 
     // Load MCP configuration
+    const mcpLoadStart = Date.now();
     const mcpServers = await loadMcpConfig(options.cwd);
     if (mcpServers) {
       sdkOptions.mcpServers = mcpServers;
+      const mcpNames = Object.keys(mcpServers);
+      console.log(`${logPrefix} MCP servers loaded (${Date.now() - mcpLoadStart}ms): [${mcpNames.join(', ')}]`);
+    } else {
+      console.log(`${logPrefix} No MCP servers configured`);
     }
 
     // Handle images - save to temp files and modify prompt
@@ -593,22 +636,21 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
-    let queryInstance;
-    try {
-      queryInstance = query({
-        prompt: finalCommand,
-        options: sdkOptions
-      });
-    } catch (hookError) {
-      // Older/newer SDK versions may not accept hook shapes yet.
-      // Keep notification behavior operational via runtime events even if hook registration fails.
-      console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
-      delete sdkOptions.hooks;
-      queryInstance = query({
-        prompt: finalCommand,
-        options: sdkOptions
-      });
-    }
+    // Helper: create a query instance, falling back to no-hooks if registration fails.
+    const createQueryInstance = () => {
+      try {
+        return query({ prompt: finalCommand, options: sdkOptions });
+      } catch (hookError) {
+        console.warn(`${logPrefix} Hook registration failed, retrying without hooks:`, hookError?.message || hookError);
+        delete sdkOptions.hooks;
+        return query({ prompt: finalCommand, options: sdkOptions });
+      }
+    };
+
+    console.log(`${logPrefix} Creating query instance (cwd: ${options.cwd || 'none'}, permissionMode: ${sdkOptions.permissionMode || 'default'})`);
+    const queryCreateStart = Date.now();
+    let queryInstance = createQueryInstance();
+    console.log(`${logPrefix} Query instance created (${Date.now() - queryCreateStart}ms)`);
 
     // Restore immediately — Query constructor already captured the value
     if (prevStreamTimeout !== undefined) {
@@ -617,21 +659,57 @@ async function queryClaudeSDK(command, options = {}, ws) {
       delete process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     }
 
-    // Track the query instance for abort capability
+    // Track the query instance for abort capability.
+    // Also store on writer so abort-without-session-id can find it.
     if (capturedSessionId) {
       addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
     }
+    ws._pendingQueryInstance = queryInstance;
 
-    // Process streaming messages
-    console.log('Starting async generator loop for session:', capturedSessionId || 'NEW');
-    for await (const message of queryInstance) {
-      // Capture session ID from first message
+    // Process streaming messages with timeout on first message.
+    // If the SDK (or underlying CLI) hangs during initialization (e.g. MCP
+    // servers, OAuth refresh, network), we retry once before giving up.
+    console.log(`${logPrefix} Waiting for first SDK message (timeout: ${FIRST_MESSAGE_TIMEOUT_MS}ms)...`);
+
+    let firstResult;
+    try {
+      firstResult = await waitForFirstMessage(queryInstance, FIRST_MESSAGE_TIMEOUT_MS);
+      console.log(`${logPrefix} First message received (${Date.now() - queryStartTime}ms total, type: ${firstResult.value?.type || 'done'})`);
+    } catch (timeoutErr) {
+      console.warn(`${logPrefix} ⚠ TIMEOUT: No response in ${FIRST_MESSAGE_TIMEOUT_MS}ms (${Date.now() - queryStartTime}ms total). Retrying...`);
+      // Forcefully kill the hung query — interrupt() is cooperative, close() is forceful.
+      try { await queryInstance.interrupt?.(); } catch (e) { console.debug(`${logPrefix} interrupt error (ignored):`, e.message); }
+      try { await queryInstance.close?.(); } catch (e) { console.debug(`${logPrefix} close error (ignored):`, e.message); }
+      if (capturedSessionId) removeSession(capturedSessionId);
+
+      // Retry once — assign to ws._pendingQueryInstance immediately to avoid
+      // a window where abort-pending-query would find null.
+      const retryStart = Date.now();
+      const retryInstance = createQueryInstance();
+      ws._pendingQueryInstance = retryInstance;
+      queryInstance = retryInstance;
+
+      try {
+        firstResult = await waitForFirstMessage(queryInstance, FIRST_MESSAGE_TIMEOUT_MS);
+        console.log(`${logPrefix} ✓ Retry succeeded (${Date.now() - retryStart}ms, type: ${firstResult.value?.type || 'done'})`);
+      } catch (retryErr) {
+        console.error(`${logPrefix} ✗ Retry also timed out after ${Date.now() - retryStart}ms. Total elapsed: ${Date.now() - queryStartTime}ms. Giving up.`);
+        try { await queryInstance.interrupt?.(); } catch (e) { console.debug(`${logPrefix} retry interrupt error (ignored):`, e.message); }
+        try { await queryInstance.close?.(); } catch (e) { console.debug(`${logPrefix} retry close error (ignored):`, e.message); }
+        ws._pendingQueryInstance = null;
+        ws.send(createNormalizedMessage({ kind: 'error', content: 'Claude failed to start a session. Please try again.', sessionId: null, provider: 'claude' }));
+        ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 1, sessionId: null, provider: 'claude' }));
+        return;
+      }
+    }
+
+    // Process the first message that we already received
+    const processMessage = (message) => {
       if (message.session_id && !capturedSessionId) {
-
         capturedSessionId = message.session_id;
+        console.log(`${logPrefix} Session ID captured: ${capturedSessionId} (${Date.now() - queryStartTime}ms)`);
         addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
 
-        // Record session ownership for multi-user session list filtering
         if (ws.userId) {
           try {
             sessionOwnershipDb.claim(capturedSessionId, 'claude', ws.userId);
@@ -640,39 +718,29 @@ async function queryClaudeSDK(command, options = {}, ws) {
           }
         }
 
-        // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
           ws.setSessionId(capturedSessionId);
         }
 
-        // Send session-created event only once for new sessions
         if (!sessionId && !sessionCreatedSent) {
           sessionCreatedSent = true;
           ws.send(createNormalizedMessage({ kind: 'session_created', newSessionId: capturedSessionId, sessionId: capturedSessionId, provider: 'claude' }));
         }
-      } else {
-        // session_id already captured
       }
 
-      // Transform and normalize message via adapter
       const transformedMessage = transformMessage(message);
       const sid = capturedSessionId || sessionId || null;
 
-      // Use adapter to normalize SDK events into NormalizedMessage[]
       const normalized = claudeAdapter.normalizeMessage(transformedMessage, sid);
       for (const msg of normalized) {
-        // Preserve parentToolUseId from SDK wrapper for subagent tool grouping
         if (transformedMessage.parentToolUseId && !msg.parentToolUseId) {
           msg.parentToolUseId = transformedMessage.parentToolUseId;
         }
         ws.send(msg);
       }
 
-      // Extract and send token budget updates from result messages
       if (message.type === 'result') {
         const models = Object.keys(message.modelUsage || {});
-
-        // Log usage to database for each model
         for (const modelKey of models) {
           const md = message.modelUsage[modelKey];
           if (md) {
@@ -687,7 +755,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
                 md.costUSD || 0
               );
             } catch (e) {
-              // Don't break the session if logging fails
               console.error('Usage logging error:', e.message);
             }
           }
@@ -698,7 +765,19 @@ async function queryClaudeSDK(command, options = {}, ws) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
       }
+    };
+
+    // Handle first message
+    if (!firstResult.done) {
+      processMessage(firstResult.value);
     }
+
+    // Continue processing remaining messages (no timeout — SDK is alive)
+    for await (const message of queryInstance) {
+      processMessage(message);
+    }
+
+    ws._pendingQueryInstance = null;
 
     // Clean up session on completion
     if (capturedSessionId) {
@@ -709,6 +788,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     await cleanupTempFiles(tempImagePaths, tempDir);
 
     // Send completion event
+    console.log(`${logPrefix} Query completed (${Date.now() - queryStartTime}ms, session: ${capturedSessionId || 'none'})`);
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));
     notifyRunStopped({
       userId: ws?.userId || null,
@@ -720,7 +800,9 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Complete
 
   } catch (error) {
-    console.error('SDK query error:', error);
+    console.error(`${logPrefix} ✗ SDK query error (${Date.now() - queryStartTime}ms):`, error.message);
+
+    ws._pendingQueryInstance = null;
 
     // Clean up session on error
     if (capturedSessionId) {
