@@ -213,10 +213,17 @@ export default function UsageSettingsTab() {
         </div>
       )}
 
-      {/* No rate limits available */}
+      {/* No rate limits available — credentials expired */}
       {(!rl || rl.periods.length === 0) && data.plan && (
         <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
           {t('usage.noLimitsAvailable')}
+        </div>
+      )}
+
+      {/* No plan detected — never connected to Claude */}
+      {!data.plan && (
+        <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+          {t('usage.noPlanDetected')}
         </div>
       )}
     </div>
