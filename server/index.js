@@ -1593,6 +1593,17 @@ function handleChatConnection(ws, request) {
                 }
 
                 writer.send(createNormalizedMessage({ kind: 'complete', exitCode: success ? 0 : 1, aborted: true, success, sessionId: data.sessionId, provider }));
+            } else if (data.type === 'abort-pending-query') {
+                // Abort a query that hasn't produced a session ID yet.
+                // The pending queryInstance is stored on the writer by queryClaudeSDK.
+                const pendingQuery = writer._pendingQueryInstance;
+                console.log(`[SDK:ABORT] Abort pending query (no session ID), instance found: ${!!pendingQuery}`);
+                if (pendingQuery) {
+                    try { await pendingQuery.interrupt?.(); } catch { /* ignore */ }
+                    writer._pendingQueryInstance = null;
+                    console.log('[SDK:ABORT] Pending query interrupted');
+                }
+                writer.send(createNormalizedMessage({ kind: 'complete', exitCode: 1, aborted: true, success: true, sessionId: null, provider: data.provider || 'claude' }));
             } else if (data.type === 'claude-permission-response') {
                 // Relay UI approval decisions back into the SDK control flow.
                 // This does not persist permissions; it only resolves the in-flight request,

@@ -867,7 +867,13 @@ export function useChatComposerState({
       candidateSessionIds.find((sessionId) => Boolean(sessionId) && !isTemporarySessionId(sessionId)) || null;
 
     if (!targetSessionId) {
-      console.warn('Abort requested but no concrete session ID is available yet.');
+      // No session ID yet — SDK may be stuck during initialization.
+      // Send a special abort that kills the pending query by WebSocket connection.
+      console.warn('Abort requested without session ID — sending abort-pending-query');
+      sendMessage({
+        type: 'abort-pending-query',
+        provider,
+      });
       return;
     }
 
