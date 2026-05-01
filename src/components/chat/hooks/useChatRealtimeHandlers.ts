@@ -226,6 +226,7 @@ export function useChatRealtimeHandlers({
     switch (msg.kind) {
       case 'session_created': {
         const newSessionId = msg.newSessionId;
+        console.log(`[Chat:WS] session_created: ${newSessionId}`);
         if (!newSessionId) break;
 
         if (!currentSessionId || currentSessionId.startsWith('new-session-')) {
@@ -244,6 +245,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'complete': {
+        console.log(`[Chat:WS] complete: session=${sid}, exitCode=${msg.exitCode}, aborted=${!!msg.aborted}`);
         // Flush any remaining streaming state
         if (streamTimerRef.current) {
           clearTimeout(streamTimerRef.current);
@@ -288,6 +290,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'error': {
+        console.warn(`[Chat:WS] error: session=${sid}, content=${msg.content || msg.error || 'unknown'}`);
         setIsLoading(false);
         setCanAbortSession(false);
         setClaudeStatus(null);

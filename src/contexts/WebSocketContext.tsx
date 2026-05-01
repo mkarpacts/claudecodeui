@@ -60,6 +60,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
       const websocket = new WebSocket(wsUrl);
 
       websocket.onopen = () => {
+        console.log(`[WS] ${hasConnectedRef.current ? 'Reconnected' : 'Connected'}`);
         setIsConnected(true);
         wsRef.current = websocket;
         if (hasConnectedRef.current) {
@@ -78,7 +79,8 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         }
       };
 
-      websocket.onclose = () => {
+      websocket.onclose = (event) => {
+        console.warn(`[WS] Disconnected (code=${event.code}, reason=${event.reason || 'none'})`);
         setIsConnected(false);
         wsRef.current = null;
         
@@ -103,7 +105,7 @@ const useWebSocketProviderState = (): WebSocketContextType => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(message));
     } else {
-      console.warn('WebSocket not connected');
+      console.warn(`[WS] Message dropped (readyState=${socket?.readyState ?? 'no socket'}): ${message?.type || 'unknown'}`);
     }
   }, []);
 

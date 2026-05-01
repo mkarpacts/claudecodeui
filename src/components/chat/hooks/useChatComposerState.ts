@@ -639,6 +639,7 @@ export function useChatComposerState({
           },
         });
       } else {
+        console.log(`[Chat:Send] provider=claude, session=${effectiveSessionId || 'NEW'}, project=${resolvedProjectPath}`);
         sendMessage({
           type: 'claude-command',
           command: messageContent,
@@ -869,7 +870,7 @@ export function useChatComposerState({
     if (!targetSessionId) {
       // No session ID yet — SDK may be stuck during initialization.
       // Send a special abort that kills the pending query by WebSocket connection.
-      console.warn('Abort requested without session ID — sending abort-pending-query');
+      console.warn(`[Chat:Abort] No session ID — sending abort-pending-query (provider=${provider})`);
       sendMessage({
         type: 'abort-pending-query',
         provider,
