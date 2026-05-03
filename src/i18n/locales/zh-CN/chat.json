@@ -106,7 +106,6 @@
     "placeholderDefault": "输入您的消息...",
     "disabled": "输入已禁用",
     "attachFiles": "附加文件",
-    "attachImages": "附加图片",
     "send": "发送",
     "stop": "停止",
     "hintText": {

@@ -4,9 +4,10 @@ export type Provider = SessionProvider;
 
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
-export interface ChatImage {
+export interface ChatAttachment {
   data: string;
   name: string;
+  mimeType: string;
 }
 
 export interface ToolResult {
@@ -29,7 +30,7 @@ export interface ChatMessage {
   type: string;
   content?: string;
   timestamp: string | number | Date;
-  images?: ChatImage[];
+  attachments?: ChatAttachment[];
   reasoning?: string;
   isThinking?: boolean;
   isStreaming?: boolean;

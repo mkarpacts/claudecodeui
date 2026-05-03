@@ -2195,15 +2195,15 @@ Agent instructions:`;
     }
 });
 
-// Image upload endpoint
-app.post('/api/projects/:projectName/upload-images', authenticateToken, async (req, res) => {
+// File attachment upload endpoint
+app.post('/api/projects/:projectName/upload-attachments', authenticateToken, async (req, res) => {
     try {
         const multer = (await import('multer')).default;
         const path = (await import('path')).default;
         const fs = (await import('fs')).promises;
         const os = (await import('os')).default;
 
-        // Configure multer for image uploads
+        // Configure multer for file uploads
         const storage = multer.diskStorage({
             destination: async (req, file, cb) => {
                 const uploadDir = path.join(os.tmpdir(), 'claude-ui-uploads', String(req.user.id));
@@ -2217,12 +2217,27 @@ app.post('/api/projects/:projectName/upload-images', authenticateToken, async (r
             }
         });
 
+        const allowedMimes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+            'text/plain', 'text/markdown', 'text/csv',
+            'application/pdf',
+        ];
+
+        const allowedExts = new Set([
+            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
+            '.txt', '.md', '.csv', '.pdf',
+        ]);
+
         const fileFilter = (req, file, cb) => {
-            const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
             if (allowedMimes.includes(file.mimetype)) {
                 cb(null, true);
             } else {
-                cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WebP, and SVG are allowed.'));
+                const ext = path.extname(file.originalname).toLowerCase();
+                if (allowedExts.has(ext)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error('Invalid file type. Allowed: images, txt, md, csv, pdf.'));
+                }
             }
         };
 
@@ -2230,24 +2245,24 @@ app.post('/api/projects/:projectName/upload-images', authenticateToken, async (r
             storage,
             fileFilter,
             limits: {
-                fileSize: 5 * 1024 * 1024, // 5MB
+                fileSize: 10 * 1024 * 1024, // 10MB
                 files: 5
             }
         });
 
         // Handle multipart form data
-        upload.array('images', 5)(req, res, async (err) => {
+        upload.array('attachments', 5)(req, res, async (err) => {
             if (err) {
                 return res.status(400).json({ error: err.message });
             }
 
             if (!req.files || req.files.length === 0) {
-                return res.status(400).json({ error: 'No image files provided' });
+                return res.status(400).json({ error: 'No files provided' });
             }
 
             try {
-                // Process uploaded images
-                const processedImages = await Promise.all(
+                // Process uploaded attachments
+                const processedAttachments = await Promise.all(
                     req.files.map(async (file) => {
                         // Read file and convert to base64
                         const buffer = await fs.readFile(file.path);
@@ -2266,16 +2281,16 @@ app.post('/api/projects/:projectName/upload-images', authenticateToken, async (r
                     })
                 );
 
-                res.json({ images: processedImages });
+                res.json({ attachments: processedAttachments });
             } catch (error) {
-                console.error('Error processing images:', error);
+                console.error('Error processing attachments:', error);
                 // Clean up any remaining files
                 await Promise.all(req.files.map(f => fs.unlink(f.path).catch(() => { })));
-                res.status(500).json({ error: 'Failed to process images' });
+                res.status(500).json({ error: 'Failed to process attachments' });
             }
         });
     } catch (error) {
-        console.error('Error in image upload endpoint:', error);
+        console.error('Error in attachment upload endpoint:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
