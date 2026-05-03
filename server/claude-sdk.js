@@ -355,10 +355,9 @@ function extractTokenBudget(resultMessage) {
  * Saves base64 images to temporary files and returns modified prompt with file paths
  * @param {string} command - Original user prompt
  * @param {Array} images - Array of image objects with base64 data
- * @param {string} cwd - Working directory for temp file creation
  * @returns {Promise<Object>} {modifiedCommand, tempImagePaths, tempDir}
  */
-async function handleImages(command, images, cwd) {
+async function handleImages(command, images) {
   const tempImagePaths = [];
   let tempDir = null;
 
@@ -367,10 +366,9 @@ async function handleImages(command, images, cwd) {
   }
 
   try {
-    // Create temp directory in the project directory
-    const workingDir = cwd || process.cwd();
-    tempDir = path.join(workingDir, '.tmp', 'images', Date.now().toString());
-    await fs.mkdir(tempDir, { recursive: true });
+    // Create temp directory in system temp (avoids read-only volume issues in Docker)
+    await fs.mkdir(path.join(os.tmpdir(), 'claude-ui-images'), { recursive: true });
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-ui-images', path.sep));
 
     // Save each image to a temp file
     for (const [index, image] of images.entries()) {
@@ -535,7 +533,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     }
 
     // Handle images - save to temp files and modify prompt
-    const imageResult = await handleImages(command, options.images, options.cwd);
+    const imageResult = await handleImages(command, options.images);
     const finalCommand = imageResult.modifiedCommand;
     tempImagePaths = imageResult.tempImagePaths;
     tempDir = imageResult.tempDir;
