@@ -121,17 +121,42 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             <div className="whitespace-pre-wrap break-words text-sm">
               {message.content}
             </div>
-            {message.images && message.images.length > 0 && (
+            {message.attachments && message.attachments.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {message.images.map((img, idx) => (
-                  <img
-                    key={img.name || idx}
-                    src={img.data}
-                    alt={img.name}
-                    className="h-auto max-w-full cursor-pointer rounded-lg transition-opacity hover:opacity-90"
-                    onClick={() => window.open(img.data, '_blank')}
-                  />
-                ))}
+                {message.attachments.map((attachment: any, idx: number) => {
+                  const isPreviewable =
+                    attachment.mimeType?.match(/^image\/(jpeg|png|gif|webp)$/) ||
+                    attachment.data?.match(/^data:image\/(jpeg|png|gif|webp)/);
+                  return isPreviewable ? (
+                    <img
+                      key={idx}
+                      src={attachment.data}
+                      alt={attachment.name || `attachment-${idx}`}
+                      className="max-h-64 cursor-pointer rounded object-contain"
+                      onClick={() => window.open(attachment.data, '_blank')}
+                    />
+                  ) : (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 rounded bg-muted/40 px-3 py-2 text-sm"
+                    >
+                      <svg
+                        className="h-4 w-4 shrink-0 text-muted-foreground"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                        />
+                      </svg>
+                      <span className="truncate">{attachment.name}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
             <div className="mt-1 flex items-center justify-end gap-1 text-xs text-blue-100">

@@ -15,7 +15,7 @@ import MicButton from '../../../mic-button/view/MicButton';
 import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
 import CommandMenu from './CommandMenu';
 import ClaudeStatus from './ClaudeStatus';
-import ImageAttachment from './ImageAttachment';
+import FileAttachment from './FileAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ChatInputControls from './ChatInputControls';
 
@@ -59,10 +59,10 @@ interface ChatComposerProps {
   onScrollToBottom: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
-  attachedImages: File[];
-  onRemoveImage: (index: number) => void;
-  uploadingImages: Map<string, number>;
-  imageErrors: Map<string, string>;
+  attachedFiles: File[];
+  onRemoveFile: (index: number) => void;
+  uploadingFiles: Map<string, number>;
+  fileErrors: Map<string, string>;
   showFileDropdown: boolean;
   filteredFiles: MentionableFile[];
   selectedFileIndex: number;
@@ -75,7 +75,7 @@ interface ChatComposerProps {
   frequentCommands: SlashCommand[];
   getRootProps: (...args: unknown[]) => Record<string, unknown>;
   getInputProps: (...args: unknown[]) => Record<string, unknown>;
-  openImagePicker: () => void;
+  openFilePicker: () => void;
   inputHighlightRef: RefObject<HTMLDivElement>;
   renderInputWithMentions: (text: string) => ReactNode;
   textareaRef: RefObject<HTMLTextAreaElement>;
@@ -116,10 +116,10 @@ export default function ChatComposer({
   onScrollToBottom,
   onSubmit,
   isDragActive,
-  attachedImages,
-  onRemoveImage,
-  uploadingImages,
-  imageErrors,
+  attachedFiles,
+  onRemoveFile,
+  uploadingFiles,
+  fileErrors,
   showFileDropdown,
   filteredFiles,
   selectedFileIndex,
@@ -132,7 +132,7 @@ export default function ChatComposer({
   frequentCommands,
   getRootProps,
   getInputProps,
-  openImagePicker,
+  openFilePicker,
   inputHighlightRef,
   renderInputWithMentions,
   textareaRef,
@@ -217,21 +217,21 @@ export default function ChatComposer({
                   d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
                 />
               </svg>
-              <p className="text-sm font-medium">Drop images here</p>
+              <p className="text-sm font-medium">Drop files here</p>
             </div>
           </div>
         )}
 
-        {attachedImages.length > 0 && (
+        {attachedFiles.length > 0 && (
           <div className="mb-2 rounded-xl bg-muted/40 p-2">
             <div className="flex flex-wrap gap-2">
-              {attachedImages.map((file, index) => (
-                <ImageAttachment
+              {attachedFiles.map((file, index) => (
+                <FileAttachment
                   key={index}
                   file={file}
-                  onRemove={() => onRemoveImage(index)}
-                  uploadProgress={uploadingImages.get(file.name)}
-                  error={imageErrors.get(file.name)}
+                  onRemove={() => onRemoveFile(index)}
+                  uploadProgress={uploadingFiles.get(file.name)}
+                  error={fileErrors.get(file.name)}
                 />
               ))}
             </div>
@@ -307,9 +307,10 @@ export default function ChatComposer({
 
             <button
               type="button"
-              onClick={openImagePicker}
+              onClick={openFilePicker}
               className="absolute left-2 top-1/2 -translate-y-1/2 transform rounded-xl p-2 transition-colors hover:bg-accent/60"
-              title={t('input.attachImages')}
+              title={t('input.attachFiles')}
+              aria-label="Attach files"
             >
               <svg className="h-5 w-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path

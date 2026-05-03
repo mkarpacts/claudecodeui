@@ -124,7 +124,6 @@
     "placeholderDefault": "Введите ваше сообщение...",
     "disabled": "Ввод отключен",
     "attachFiles": "Прикрепить файлы",
-    "attachImages": "Прикрепить изображения",
     "send": "Отправить",
     "stop": "Остановить",
     "hintText": {
