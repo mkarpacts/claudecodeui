@@ -1,17 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
-import { AUTH_ERROR_MESSAGES, AUTH_TOKEN_STORAGE_KEY } from '../constants';
+import { AUTH_ERROR_MESSAGES, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY } from '../constants';
 import type {
   AuthContextValue,
   AuthProviderProps,
-  AuthSessionPayload,
   AuthStatusPayload,
   AuthUser,
   AuthUserPayload,
   OnboardingStatusPayload,
 } from '../types';
-import { parseJsonSafely, resolveApiErrorMessage } from '../utils';
+import { parseJsonSafely } from '../utils';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -24,6 +23,31 @@ const persistToken = (token: string) => {
 const clearStoredToken = () => {
   localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 };
+
+/**
+ * Extract auth_token or auth_error from URL fragment once.
+ * Clears the fragment after reading. Subsequent calls return nulls.
+ */
+let fragmentConsumed = false;
+function extractAuthFragment(): { token: string | null; error: string | null } {
+  if (fragmentConsumed) return { token: null, error: null };
+
+  const hash = window.location.hash;
+  if (!hash || hash.length < 2) return { token: null, error: null };
+
+  const params = new URLSearchParams(hash.substring(1));
+  const token = params.get('auth_token');
+  const errorCode = params.get('auth_error');
+
+  if (token || errorCode) {
+    fragmentConsumed = true;
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+
+  const error = errorCode ? (AUTH_FRAGMENT_ERRORS[errorCode] || AUTH_ERROR_MESSAGES.authFailed) : null;
+
+  return { token, error };
+}
 
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
@@ -38,7 +62,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(() => readStoredToken());
   const [isLoading, setIsLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const [authConfigured, setAuthConfigured] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +89,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setHasCompletedOnboarding(Boolean(payload?.hasCompletedOnboarding));
     } catch (caughtError) {
       console.error('Error checking onboarding status:', caughtError);
-      // Fail open to avoid blocking access on transient onboarding status errors.
       setHasCompletedOnboarding(true);
     }
   }, []);
@@ -79,17 +102,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(true);
       setError(null);
 
+      // Check URL fragment for token or error from Microsoft callback
+      const fragment = extractAuthFragment();
+      if (fragment.error) {
+        setError(fragment.error);
+      }
+      if (fragment.token) {
+        persistToken(fragment.token);
+        setToken(fragment.token);
+      }
+
+      const activeToken = fragment.token || token;
+
       const statusResponse = await api.auth.status();
       const statusPayload = await parseJsonSafely<AuthStatusPayload>(statusResponse);
 
-      if (statusPayload?.needsSetup) {
-        setNeedsSetup(true);
-        return;
-      }
+      setAuthConfigured(statusPayload?.authConfigured ?? false);
 
-      setNeedsSetup(false);
-
-      if (!token) {
+      if (!activeToken) {
         return;
       }
 
@@ -106,6 +136,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       setUser(userPayload.user);
+      if (!fragment.token) {
+        setToken(activeToken);
+      }
       await checkOnboardingStatus();
     } catch (caughtError) {
       console.error('[Auth] Auth status check failed:', caughtError);
@@ -118,7 +151,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     if (IS_PLATFORM) {
       setUser({ username: 'platform-user' });
-      setNeedsSetup(false);
+      setAuthConfigured(true);
       void checkOnboardingStatus().finally(() => {
         setIsLoading(false);
       });
@@ -128,57 +161,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     void checkAuthStatus();
   }, [checkAuthStatus, checkOnboardingStatus]);
 
-  const login = useCallback<AuthContextValue['login']>(
-    async (username, password) => {
-      try {
-        setError(null);
-        const response = await api.auth.login(username, password);
-        const payload = await parseJsonSafely<AuthSessionPayload>(response);
-
-        if (!response.ok || !payload?.token || !payload.user) {
-          const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.loginFailed);
-          setError(message);
-          return { success: false, error: message };
-        }
-
-        setSession(payload.user, payload.token);
-        setNeedsSetup(false);
-        await checkOnboardingStatus();
-        return { success: true };
-      } catch (caughtError) {
-        console.error('Login error:', caughtError);
-        setError(AUTH_ERROR_MESSAGES.networkError);
-        return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
-      }
-    },
-    [checkOnboardingStatus, setSession],
-  );
-
-  const register = useCallback<AuthContextValue['register']>(
-    async (username, password) => {
-      try {
-        setError(null);
-        const response = await api.auth.register(username, password);
-        const payload = await parseJsonSafely<AuthSessionPayload>(response);
-
-        if (!response.ok || !payload?.token || !payload.user) {
-          const message = resolveApiErrorMessage(payload, AUTH_ERROR_MESSAGES.registrationFailed);
-          setError(message);
-          return { success: false, error: message };
-        }
-
-        setSession(payload.user, payload.token);
-        setNeedsSetup(false);
-        await checkOnboardingStatus();
-        return { success: true };
-      } catch (caughtError) {
-        console.error('Registration error:', caughtError);
-        setError(AUTH_ERROR_MESSAGES.networkError);
-        return { success: false, error: AUTH_ERROR_MESSAGES.networkError };
-      }
-    },
-    [checkOnboardingStatus, setSession],
-  );
+  const loginWithMicrosoft = useCallback(() => {
+    window.location.href = '/api/auth/microsoft';
+  }, []);
 
   const logout = useCallback(() => {
     const tokenToInvalidate = token;
@@ -196,23 +181,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       user,
       token,
       isLoading,
-      needsSetup,
+      authConfigured,
       hasCompletedOnboarding,
       error,
-      login,
-      register,
+      loginWithMicrosoft,
       logout,
       refreshOnboardingStatus,
     }),
     [
+      authConfigured,
       error,
       hasCompletedOnboarding,
       isLoading,
-      login,
+      loginWithMicrosoft,
       logout,
-      needsSetup,
       refreshOnboardingStatus,
-      register,
       token,
       user,
     ],

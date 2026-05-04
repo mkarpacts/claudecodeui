@@ -16,7 +16,7 @@ export type AuthSessionPayload = {
 };
 
 export type AuthStatusPayload = {
-  needsSetup?: boolean;
+  authConfigured?: boolean;
 };
 
 export type AuthUserPayload = {
@@ -36,11 +36,10 @@ export type AuthContextValue = {
   user: AuthUser | null;
   token: string | null;
   isLoading: boolean;
-  needsSetup: boolean;
+  authConfigured: boolean;
   hasCompletedOnboarding: boolean;
   error: string | null;
-  login: (username: string, password: string) => Promise<AuthActionResult>;
-  register: (username: string, password: string) => Promise<AuthActionResult>;
+  loginWithMicrosoft: () => void;
   logout: () => void;
   refreshOnboardingStatus: () => Promise<void>;
 };
