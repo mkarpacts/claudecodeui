@@ -82,7 +82,7 @@ export default function SidebarProjectSessions({
     <div className="ml-3 space-y-1 border-l border-border pl-3">
       {!initialSessionsLoaded ? (
         <SessionListSkeleton />
-      ) : !hasSessions && !isLoadingSessions ? (
+      ) : !hasSessions && !isLoadingSessions && !hasMoreSessions ? (
         <div className="px-3 py-2 text-left">
           <p className="text-xs text-muted-foreground">{t('sessions.noSessions')}</p>
         </div>
@@ -108,7 +108,7 @@ export default function SidebarProjectSessions({
         ))
       )}
 
-      {hasSessions && hasMoreSessions && (
+      {hasMoreSessions && (
         <Button
           variant="ghost"
           size="sm"
