@@ -107,7 +107,8 @@
     "tasks": "Tasks",
     "notifications": "Notifications",
     "usage": "Usage",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "sync": "Source Code Sync"
   },
   "notifications": {
     "title": "Notifications",
@@ -515,5 +516,27 @@
     "installAriaLabel": "Plugin git repository URL",
     "tab": "tab",
     "runningStatus": "running"
+  },
+  "sync": {
+    "title": "Source Code Sync",
+    "allSynced": "All repositories synced",
+    "syncedWithWarnings": "Synced with warnings",
+    "syncFailed": "Sync failed",
+    "lastCycle": "Last sync cycle",
+    "nextSync": "Next sync in",
+    "hours": "h",
+    "minutes": "min",
+    "searchPlaceholder": "Search repositories...",
+    "repository": "Repository",
+    "lastSynced": "Last Synced",
+    "branch": "Branch",
+    "neverSynced": "Never synced",
+    "failedAt": "failed at {{time}}",
+    "noLog": "Sync log not found. Git sync may not be configured.",
+    "noData": "No sync data available yet.",
+    "loadError": "Failed to load sync status.",
+    "repoCount": "{{count}} repositories",
+    "ok": "OK",
+    "failed": "FAILED"
   }
 }
