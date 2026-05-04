@@ -76,16 +76,61 @@ import { IS_PLATFORM } from './constants/config.js';
 import { getConnectableHost } from '../shared/networkHosts.js';
 
 /**
- * Filter projects to show only sessions owned by userId.
- * Projects with no sessions (empty workspaces) remain visible to everyone.
- * Returns new array — never mutates the input.
+ * Filter project sessions by ownership (synchronous fallback).
+ * Only filters the already-loaded batch; total/hasMore may be approximate.
  */
 function filterProjectsByOwner(projects, ownedIds) {
     return projects.map(project => {
         if (!project.sessions) return project;
         const filtered = project.sessions.filter(s => ownedIds.has(s.id));
-        return { ...project, sessions: filtered, sessionMeta: { hasMore: Boolean(project.sessionMeta?.hasMore), total: filtered.length } };
+        const removedByFilter = project.sessions.length - filtered.length;
+        // If we filtered out sessions or there are more on disk, signal hasMore
+        const hasMore = Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0;
+        return { ...project, sessions: filtered, sessionMeta: { hasMore, total: filtered.length } };
     });
+}
+
+/**
+ * Filter project sessions by ownership with re-fetch when needed (for HTTP endpoint).
+ * When the initial batch doesn't contain enough owned sessions, re-fetches up to
+ * MAX_REFETCH_SESSIONS sessions for that project to find the user's sessions.
+ */
+const MAX_REFETCH_SESSIONS = 200;
+
+async function filterProjectsByOwnerAsync(projects, ownedIds, limit = 5) {
+    return Promise.all(projects.map(async project => {
+        if (!project.sessions) return project;
+
+        const filtered = project.sessions.filter(s => ownedIds.has(s.id));
+
+        // Re-fetch only when we don't have enough owned sessions to fill the page
+        // AND there might be more sessions available (either on disk or filtered out)
+        const removedByFilter = project.sessions.length - filtered.length;
+        const needsRefetch = filtered.length < limit && (Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0);
+        if (needsRefetch) {
+            try {
+                const allResult = await getSessions(project.name, MAX_REFETCH_SESSIONS, 0);
+                const allFiltered = allResult.sessions.filter(s => ownedIds.has(s.id));
+                return {
+                    ...project,
+                    sessions: allFiltered.slice(0, limit),
+                    sessionMeta: {
+                        hasMore: allFiltered.length > limit,
+                        total: allFiltered.length
+                    }
+                };
+            } catch (e) {
+                console.warn(`[filterProjectsByOwnerAsync] Re-fetch failed for project ${project.name}:`, e.message);
+                // Fall through to basic filtering on error
+            }
+        }
+
+        return {
+            ...project,
+            sessions: filtered,
+            sessionMeta: { hasMore: false, total: filtered.length }
+        };
+    }));
 }
 
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
@@ -531,7 +576,7 @@ app.get('/api/projects', authenticateToken, async (req, res) => {
 
         // Multi-user: show only own sessions, hide projects with only other users' sessions
         const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
-        res.json(filterProjectsByOwner(projects, ownedIds));
+        res.json(await filterProjectsByOwnerAsync(projects, ownedIds));
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -543,8 +588,8 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
         const parsedLimit = parseInt(limit);
         const parsedOffset = parseInt(offset);
 
-        // Load all sessions, filter to current user's, then paginate
-        const allResult = await getSessions(req.params.projectName, 999999, 0);
+        // Load sessions (capped), filter to current user's, then paginate
+        const allResult = await getSessions(req.params.projectName, MAX_REFETCH_SESSIONS, 0);
         const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
         const filtered = allResult.sessions.filter(s => ownedIds.has(s.id));
 

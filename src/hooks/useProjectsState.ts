@@ -72,6 +72,51 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
   ];
 };
 
+/**
+ * Merge WebSocket project updates with current state to prevent session loss.
+ * The server's sync ownership filter may return fewer sessions than the initial
+ * HTTP load (which uses a full re-fetch). This function preserves sessions that
+ * were correctly loaded initially but absent from the WebSocket update.
+ */
+const mergeProjectSessions = (
+  currentProjects: Project[],
+  updatedProjects: Project[],
+  recentlyDeleted: Set<string>,
+): Project[] => {
+  const currentByName = new Map(currentProjects.map((p) => [p.name, p]));
+
+  return updatedProjects.map((updated) => {
+    const current = currentByName.get(updated.name);
+    if (!current?.sessions?.length) return updated;
+
+    const updatedSessions = updated.sessions ?? [];
+    const updatedIds = new Set(updatedSessions.map((s) => s.id));
+
+    // Keep sessions from current state that aren't in the update
+    // (they were likely filtered out by the server's sync ownership filter)
+    // but exclude sessions that were intentionally deleted by the user
+    const preserved = current.sessions.filter(
+      (s) => !updatedIds.has(s.id) && !recentlyDeleted.has(s.id),
+    );
+
+    if (preserved.length === 0) return updated;
+
+    const merged = [...updatedSessions, ...preserved];
+
+    return {
+      ...updated,
+      sessions: merged,
+      sessionMeta: {
+        hasMore: updated.sessionMeta?.hasMore || current.sessionMeta?.hasMore || false,
+        total: Math.max(
+          updated.sessionMeta?.total ?? 0,
+          current.sessionMeta?.total ?? 0,
+        ),
+      },
+    };
+  });
+};
+
 const isUpdateAdditive = (
   currentProjects: Project[],
   updatedProjects: Project[],
@@ -155,6 +200,10 @@ export function useProjectsState({
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track recently deleted session IDs to prevent mergeProjectSessions from
+  // resurrecting them when a WebSocket update arrives before state propagates
+  const recentlyDeletedSessionsRef = useRef<Set<string>>(new Set());
 
   const fetchProjects = useCallback(async ({ showLoadingState = true }: FetchProjectsOptions = {}) => {
     try {
@@ -254,7 +303,9 @@ export function useProjectsState({
       (selectedSession && activeSessions.has(selectedSession.id)) ||
       (activeSessions.size > 0 && Array.from(activeSessions).some((id) => id.startsWith('new-session-')));
 
-    const updatedProjects = projectsMessage.projects;
+    // Merge with current state to preserve sessions that the server's sync
+    // ownership filter may have excluded from this WebSocket update
+    const updatedProjects = mergeProjectSessions(projects, projectsMessage.projects, recentlyDeletedSessionsRef.current);
 
     if (
       hasActiveSession &&
@@ -431,6 +482,13 @@ export function useProjectsState({
         setSelectedSession(null);
         navigate('/');
       }
+
+      // Track this deletion so mergeProjectSessions won't resurrect it
+      // from a stale WebSocket update arriving within the next 10 seconds
+      recentlyDeletedSessionsRef.current.add(sessionIdToDelete);
+      setTimeout(() => {
+        recentlyDeletedSessionsRef.current.delete(sessionIdToDelete);
+      }, 10_000);
 
       setProjects((prevProjects) =>
         prevProjects.map((project) => ({
