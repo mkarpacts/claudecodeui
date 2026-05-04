@@ -237,4 +237,9 @@ export const api = {
   usage: {
     current: () => authenticatedFetch('/api/usage/current'),
   },
+
+  // Git Sync
+  gitSync: {
+    status: () => authenticatedFetch('/api/git-sync/status'),
+  },
 };
