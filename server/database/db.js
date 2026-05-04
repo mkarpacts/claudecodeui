@@ -100,6 +100,17 @@ const runMigrations = () => {
       db.exec('ALTER TABLE users ADD COLUMN has_completed_onboarding BOOLEAN DEFAULT 0');
     }
 
+    if (!columnNames.includes('microsoft_id')) {
+      console.log('Running migration: Adding microsoft_id column');
+      db.exec('ALTER TABLE users ADD COLUMN microsoft_id TEXT');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_microsoft_id ON users(microsoft_id)');
+    }
+
+    if (!columnNames.includes('email')) {
+      console.log('Running migration: Adding email column');
+      db.exec('ALTER TABLE users ADD COLUMN email TEXT');
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS user_notification_preferences (
         user_id INTEGER PRIMARY KEY,
@@ -253,6 +264,27 @@ const userDb = {
       return row;
     } catch (err) {
       throw err;
+    }
+  },
+
+  getUserByMicrosoftId: (microsoftId) => {
+    try {
+      const row = db.prepare('SELECT id, username, microsoft_id, email, created_at, last_login FROM users WHERE microsoft_id = ? AND is_active = 1').get(microsoftId);
+      return row || null;
+    } catch (error) {
+      console.error('Error getting user by microsoft_id:', error);
+      return null;
+    }
+  },
+
+  createMicrosoftUser: (username, microsoftId, email) => {
+    try {
+      const stmt = db.prepare('INSERT INTO users (username, microsoft_id, email) VALUES (?, ?, ?)');
+      const result = stmt.run(username, microsoftId, email);
+      return { id: result.lastInsertRowid, username, microsoft_id: microsoftId, email };
+    } catch (error) {
+      console.error('Error creating Microsoft user:', error);
+      throw error;
     }
   },
 
