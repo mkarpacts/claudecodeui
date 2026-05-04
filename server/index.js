@@ -115,7 +115,9 @@ async function filterProjectsByOwnerAsync(projects, ownedIds, limit = 5) {
                     ...project,
                     sessions: allFiltered.slice(0, limit),
                     sessionMeta: {
-                        hasMore: allFiltered.length > limit,
+                        // Signal hasMore if user has more than limit, OR if we hit
+                        // the cap and there are more sessions on disk we didn't scan
+                        hasMore: allFiltered.length > limit || allResult.hasMore,
                         total: allFiltered.length
                     }
                 };
@@ -128,7 +130,10 @@ async function filterProjectsByOwnerAsync(projects, ownedIds, limit = 5) {
         return {
             ...project,
             sessions: filtered,
-            sessionMeta: { hasMore: false, total: filtered.length }
+            sessionMeta: {
+                hasMore: Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0,
+                total: project.sessionMeta?.total || filtered.length
+            }
         };
     }));
 }
@@ -588,8 +593,8 @@ app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, re
         const parsedLimit = parseInt(limit);
         const parsedOffset = parseInt(offset);
 
-        // Load sessions (capped), filter to current user's, then paginate
-        const allResult = await getSessions(req.params.projectName, MAX_REFETCH_SESSIONS, 0);
+        // Load all sessions (uncapped — this is user-initiated, per-project), filter to current user's, then paginate
+        const allResult = await getSessions(req.params.projectName, 999999, 0);
         const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
         const filtered = allResult.sessions.filter(s => ownedIds.has(s.id));
 

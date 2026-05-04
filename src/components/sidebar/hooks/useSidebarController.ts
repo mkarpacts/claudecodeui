@@ -128,11 +128,18 @@ export function useSidebarController({
     return () => clearInterval(timer);
   }, []);
 
+  // Reset pagination state only when the set of projects changes (added/removed),
+  // not on every WebSocket session-data update which would wipe "Show more" results
+  const projectListKey = useMemo(
+    () => projects.map((p) => p.name).sort().join('\0'),
+    [projects],
+  );
+
   useEffect(() => {
     setAdditionalSessions({});
     setInitialSessionsLoaded(new Set());
     setProjectHasMoreOverrides({});
-  }, [projects]);
+  }, [projectListKey]);
 
   useEffect(() => {
     if (selectedProject) {

@@ -336,13 +336,9 @@ export function useProjectsState({
       return;
     }
 
-    const updatedSelectedSession = getProjectSessions(updatedSelectedProject).find(
-      (session) => session.id === selectedSession.id,
-    );
-
-    if (!updatedSelectedSession) {
-      setSelectedSession(null);
-    }
+    // Don't clear selectedSession here — the session may exist in pagination
+    // (additionalSessions) or simply not be in this WebSocket update's initial batch.
+    // Session deletion is handled explicitly via handleSessionDelete.
   }, [latestMessage, selectedProject, selectedSession, activeSessions, projects]);
 
   useEffect(() => {
