@@ -1,4 +1,4 @@
-import { BarChart3, Bell, Bot, FolderSync, GitBranch, Key, ListChecks, Palette, Puzzle } from 'lucide-react';
+import { BarChart3, Bell, Bot, Coins, FolderSync, GitBranch, Key, ListChecks, Palette, Puzzle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/utils';
 import { PillBar, Pill } from '../../../shared/view/ui';
@@ -25,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'notifications', labelKey: 'mainTabs.notifications', icon: Bell },
   { id: 'usage', labelKey: 'mainTabs.usage', icon: BarChart3 },
   { id: 'sync', labelKey: 'mainTabs.sync', icon: FolderSync },
+  { id: 'tokenUsage', labelKey: 'mainTabs.tokenUsage', icon: Coins },
 ];
 
 export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebarProps) {

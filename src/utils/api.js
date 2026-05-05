@@ -238,6 +238,37 @@ export const api = {
     current: () => authenticatedFetch('/api/usage/current'),
   },
 
+  // Token Usage Statistics
+  usageStats: {
+    sessions: ({ from, to, model, sortBy, sortDir, limit, offset } = {}) => {
+      const params = new URLSearchParams();
+      if (from) params.append('from', from);
+      if (to) params.append('to', to);
+      if (model) params.append('model', model);
+      if (sortBy) params.append('sortBy', sortBy);
+      if (sortDir) params.append('sortDir', sortDir);
+      if (limit != null) params.append('limit', String(limit));
+      if (offset != null) params.append('offset', String(offset));
+      const qs = params.toString();
+      return authenticatedFetch(`/api/usage-stats/sessions${qs ? `?${qs}` : ''}`);
+    },
+    summary: ({ from, to, model } = {}) => {
+      const params = new URLSearchParams();
+      if (from) params.append('from', from);
+      if (to) params.append('to', to);
+      if (model) params.append('model', model);
+      const qs = params.toString();
+      return authenticatedFetch(`/api/usage-stats/summary${qs ? `?${qs}` : ''}`);
+    },
+    sessionDetail: (sessionId, { limit, offset } = {}) => {
+      const params = new URLSearchParams();
+      if (limit != null) params.append('limit', String(limit));
+      if (offset != null) params.append('offset', String(offset));
+      const qs = params.toString();
+      return authenticatedFetch(`/api/usage-stats/sessions/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`);
+    },
+  },
+
   // Git Sync
   gitSync: {
     status: () => authenticatedFetch('/api/git-sync/status'),

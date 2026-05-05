@@ -24,16 +24,18 @@ type SyncStatusData = {
   repos: RepoStatus[];
 };
 
-/** Parse timestamp that may use space or T as date/time separator. */
+/** Parse timestamp that may use space or T as date/time separator. Assumes UTC if no timezone info. */
 function parseTimestamp(ts: string): Date {
-  return new Date(ts.includes('T') ? ts : ts.replace(' ', 'T'));
+  const normalized = ts.includes('T') ? ts : ts.replace(' ', 'T');
+  // Append Z if no timezone indicator present, so Date parses as UTC
+  return new Date(/[Z+\-]\d|Z$/.test(normalized) ? normalized : normalized + 'Z');
 }
 
 function formatTime(isoString: string): string {
   const date = parseTimestamp(isoString);
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
-  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
   if (isToday) return `Today ${time}`;
   return `${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${time}`;
 }
@@ -229,7 +231,7 @@ function RepoSyncTime({ repo, t }: { repo: RepoStatus; t: (key: string, opts?: R
 
   if (repo.lastSyncedAt && repo.status === 'failed' && repo.lastFailedAt) {
     const failedTime = parseTimestamp(repo.lastFailedAt);
-    const failedTimeStr = failedTime.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const failedTimeStr = failedTime.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
     return (
       <span>
         <span className="text-muted-foreground">{formatTime(repo.lastSyncedAt)}</span>

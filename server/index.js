@@ -69,6 +69,7 @@ import pluginsRoutes from './routes/plugins.js';
 import messagesRoutes from './routes/messages.js';
 import usageRoutes from './routes/usage.js';
 import gitSyncRoutes from './routes/git-sync.js';
+import usageStatsRoutes from './routes/usage-stats.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb } from './database/db.js';
@@ -484,6 +485,9 @@ app.use('/api/plugins', authenticateToken, pluginsRoutes);
 
 // Usage data route (protected)
 app.use('/api/usage', authenticateToken, usageRoutes);
+
+// Token usage statistics (protected)
+app.use('/api/usage-stats', authenticateToken, usageStatsRoutes);
 
 // Unified session messages route (protected)
 app.use('/api/sessions', authenticateToken, messagesRoutes);

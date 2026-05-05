@@ -184,6 +184,25 @@ const runMigrations = () => {
       console.error('[MIGRATION] Failed to add cost_usd column to usage_log:', err.message);
     }
 
+    // Migration: add query_preview and user_id columns to usage_log
+    try {
+      const usageCols = db.prepare("PRAGMA table_info(usage_log)").all().map(c => c.name);
+      if (!usageCols.includes('query_preview')) {
+        console.log('Running migration: Adding query_preview column to usage_log');
+        db.exec('ALTER TABLE usage_log ADD COLUMN query_preview TEXT');
+      }
+      if (!usageCols.includes('user_id')) {
+        console.log('Running migration: Adding user_id column to usage_log');
+        db.exec('ALTER TABLE usage_log ADD COLUMN user_id INTEGER');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_usage_log_user ON usage_log(user_id)');
+      }
+      // Composite index: speeds up correlated subquery (first_query_preview)
+      // and getSessionTurns (WHERE session_id ORDER BY created_at)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_usage_log_session_created ON usage_log(session_id, created_at)');
+    } catch (err) {
+      console.error('[MIGRATION] Failed to add query_preview/user_id columns to usage_log:', err.message);
+    }
+
     // Migration: create session_ownership table for multi-user session isolation
     db.exec(`CREATE TABLE IF NOT EXISTS session_ownership (
       session_id TEXT NOT NULL,
@@ -665,10 +684,91 @@ const appConfigDb = {
 };
 
 const usageDb = {
-  log: (sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd = 0) => {
+  log: (sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd = 0, queryPreview = null, userId = null) => {
     db.prepare(
-      'INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd);
+      'INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, query_preview, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd, queryPreview, userId);
+  },
+
+  getSessionsSummary: ({ from, to, model = null, sortBy = 'total_tokens', sortDir = 'desc', limit = 10, offset = 0 }) => {
+    const ALLOWED_SORT_COLUMNS = ['total_context', 'total_output', 'total_tokens', 'total_cost', 'turn_count', 'first_turn'];
+    const ALLOWED_SORT_DIR = ['asc', 'desc'];
+    const safeSortBy = ALLOWED_SORT_COLUMNS.includes(sortBy) ? sortBy : 'total_tokens';
+    const safeSortDir = ALLOWED_SORT_DIR.includes(sortDir) ? sortDir : 'desc';
+
+    const baseWhere = `WHERE ul.created_at >= ? AND ul.created_at <= ?${model ? ' AND ul.model LIKE ?' : ''}`;
+    const params = model ? [from, to, `%${model}%`] : [from, to];
+
+    const rows = db.prepare(`
+      SELECT
+        ul.session_id,
+        MIN(sn.custom_name) AS session_name,
+        MIN(u.username) AS username,
+        GROUP_CONCAT(DISTINCT ul.model) AS models,
+        SUM(COALESCE(ul.input_tokens, 0)) AS total_input,
+        SUM(COALESCE(ul.cache_read_tokens, 0)) AS total_cache_read,
+        SUM(COALESCE(ul.cache_creation_tokens, 0)) AS total_cache_create,
+        SUM(COALESCE(ul.input_tokens, 0) + COALESCE(ul.cache_read_tokens, 0) + COALESCE(ul.cache_creation_tokens, 0)) AS total_context,
+        SUM(COALESCE(ul.output_tokens, 0)) AS total_output,
+        SUM(COALESCE(ul.input_tokens, 0) + COALESCE(ul.cache_read_tokens, 0) + COALESCE(ul.cache_creation_tokens, 0) + COALESCE(ul.output_tokens, 0)) AS total_tokens,
+        SUM(COALESCE(ul.cost_usd, 0)) AS total_cost,
+        COUNT(*) AS turn_count,
+        MIN(ul.created_at) AS first_turn,
+        MAX(ul.created_at) AS last_turn,
+        (SELECT ul2.query_preview FROM usage_log ul2 WHERE ul2.session_id = ul.session_id AND ul2.query_preview IS NOT NULL AND ul2.query_preview != '' ORDER BY ul2.created_at ASC LIMIT 1) AS first_query_preview
+      FROM usage_log ul
+      LEFT JOIN session_names sn ON sn.session_id = ul.session_id AND sn.provider = 'claude'
+      LEFT JOIN users u ON u.id = ul.user_id
+      ${baseWhere}
+      GROUP BY ul.session_id
+      ORDER BY ${safeSortBy} ${safeSortDir}
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    const countRow = db.prepare(`
+      SELECT COUNT(DISTINCT ul.session_id) AS total
+      FROM usage_log ul
+      ${baseWhere}
+    `).get(...params);
+
+    return { items: rows, total: countRow?.total || 0 };
+  },
+
+  getTotals: ({ from, to, model = null }) => {
+    const params = model ? [from, to, `%${model}%`] : [from, to];
+    const modelFilter = model ? ' AND model LIKE ?' : '';
+
+    return db.prepare(`
+      SELECT
+        COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS total_tokens,
+        COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS total_cost,
+        COUNT(DISTINCT session_id) AS session_count
+      FROM usage_log
+      WHERE created_at >= ? AND created_at <= ?${modelFilter}
+    `).get(...params);
+  },
+
+  getSessionTurns: (sessionId, { limit = 10, offset = 0 } = {}) => {
+    const rows = db.prepare(`
+      SELECT
+        id, query_preview, model,
+        COALESCE(input_tokens, 0) AS input_tokens,
+        COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
+        COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens,
+        COALESCE(output_tokens, 0) AS output_tokens,
+        COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) + COALESCE(output_tokens, 0) AS total_tokens,
+        COALESCE(cost_usd, 0) AS cost_usd, created_at
+      FROM usage_log
+      WHERE session_id = ?
+      ORDER BY created_at ASC
+      LIMIT ? OFFSET ?
+    `).all(sessionId, limit, offset);
+
+    const countRow = db.prepare(
+      'SELECT COUNT(*) AS total FROM usage_log WHERE session_id = ?'
+    ).get(sessionId);
+
+    return { items: rows, total: countRow?.total || 0 };
   },
 };
 

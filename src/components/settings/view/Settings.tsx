@@ -12,6 +12,7 @@ import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
 import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
 import UsageSettingsTab from '../view/tabs/UsageSettingsTab';
 import SyncStatusSettingsTab from '../view/tabs/SyncStatusSettingsTab';
+import TokenUsageTab from '../view/tabs/token-usage/TokenUsageTab';
 import TasksSettingsTab from '../view/tabs/tasks-settings/TasksSettingsTab';
 import PluginSettingsTab from '../../plugins/view/PluginSettingsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
@@ -116,7 +117,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
 
   return (
     <div className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4">
-      <div className="flex h-full w-full flex-col overflow-hidden border border-border bg-background shadow-2xl md:h-[90vh] md:max-w-4xl md:rounded-xl">
+      <div className="flex h-full w-full flex-col overflow-hidden border border-border bg-background shadow-2xl md:h-[90vh] md:max-w-5xl md:rounded-xl">
         {/* Header */}
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-4 py-3 md:px-5">
           <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
@@ -212,6 +213,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
               {activeTab === 'plugins' && <PluginSettingsTab />}
 
               {activeTab === 'sync' && <SyncStatusSettingsTab />}
+
+              {activeTab === 'tokenUsage' && <TokenUsageTab />}
             </div>
           </main>
         </div>
