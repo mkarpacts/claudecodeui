@@ -28,7 +28,7 @@ type SyncStatusData = {
 function parseTimestamp(ts: string): Date {
   const normalized = ts.includes('T') ? ts : ts.replace(' ', 'T');
   // Append Z if no timezone indicator present, so Date parses as UTC
-  return new Date(/[Z+\-]\d|Z$/.test(normalized) ? normalized : normalized + 'Z');
+  return new Date(/[Z+-](?:\d{2}:?\d{2})?$/.test(normalized) ? normalized : normalized + 'Z');
 }
 
 function formatTime(isoString: string): string {
