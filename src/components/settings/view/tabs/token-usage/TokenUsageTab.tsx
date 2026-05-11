@@ -256,7 +256,7 @@ export default function TokenUsageTab() {
                     </td>
                     <td className="max-w-[280px] px-3 py-2.5">
                       <div className="truncate font-medium text-foreground">
-                        {s.session_name || s.first_query_preview || s.session_id.slice(0, 12) + '...'}
+                        {s.session_name || s.first_query_text || s.session_id.slice(0, 12) + '...'}
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                         <span>{formatDate(s.first_turn)}</span>

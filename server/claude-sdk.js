@@ -600,8 +600,8 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Handle attachments - save to temp files and modify prompt
     const attachmentResult = await handleAttachments(command, options.attachments);
     const finalCommand = attachmentResult.modifiedCommand;
-    const queryPreview = typeof finalCommand === 'string'
-      ? finalCommand.replace(/\s+/g, ' ').trim().slice(0, 200)
+    const queryText = typeof finalCommand === 'string'
+      ? finalCommand.replace(/\s+/g, ' ').trim()
       : null;
     tempAttachmentPaths = attachmentResult.tempAttachmentPaths;
     tempDir = attachmentResult.tempDir;
@@ -819,7 +819,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
                 md.cacheReadInputTokens || 0,
                 md.cacheCreationInputTokens || 0,
                 md.costUSD || 0,
-                queryPreview,
+                queryText,
                 ws.userId || null
               );
             } catch (e) {

@@ -66,7 +66,7 @@ export default function TokenUsageSessionDetail({ session, onBack }: Props) {
   }, [session.turn_count, session.total_tokens]);
 
   const totalPages = Math.ceil(total / perPage);
-  const sessionName = session.session_name || session.first_query_preview || session.session_id.slice(0, 20) + '...';
+  const sessionName = session.session_name || session.first_query_text || session.session_id.slice(0, 20) + '...';
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -139,7 +139,7 @@ export default function TokenUsageSessionDetail({ session, onBack }: Props) {
                     >
                       <td className="px-3 py-2.5 text-muted-foreground">{page * perPage + i + 1}</td>
                       <td className="max-w-[240px] truncate px-3 py-2.5 text-foreground">
-                        {turn.query_preview || '\u2014'}
+                        {turn.query_text || '\u2014'}
                       </td>
                       <td className="px-3 py-2.5">
                         {turn.model && (

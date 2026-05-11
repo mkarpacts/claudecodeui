@@ -184,23 +184,22 @@ const runMigrations = () => {
       console.error('[MIGRATION] Failed to add cost_usd column to usage_log:', err.message);
     }
 
-    // Migration: add query_preview and user_id columns to usage_log
+    // Migration: add query_text and user_id columns to usage_log
     try {
       const usageCols = db.prepare("PRAGMA table_info(usage_log)").all().map(c => c.name);
-      if (!usageCols.includes('query_preview')) {
-        console.log('Running migration: Adding query_preview column to usage_log');
-        db.exec('ALTER TABLE usage_log ADD COLUMN query_preview TEXT');
+      if (!usageCols.includes('query_text')) {
+        console.log('Running migration: Adding query_text column to usage_log');
+        db.exec('ALTER TABLE usage_log ADD COLUMN query_text TEXT');
       }
       if (!usageCols.includes('user_id')) {
         console.log('Running migration: Adding user_id column to usage_log');
         db.exec('ALTER TABLE usage_log ADD COLUMN user_id INTEGER');
         db.exec('CREATE INDEX IF NOT EXISTS idx_usage_log_user ON usage_log(user_id)');
       }
-      // Composite index: speeds up correlated subquery (first_query_preview)
-      // and getSessionTurns (WHERE session_id ORDER BY created_at)
+      // Composite index: speeds up correlated subquery and getSessionTurns
       db.exec('CREATE INDEX IF NOT EXISTS idx_usage_log_session_created ON usage_log(session_id, created_at)');
     } catch (err) {
-      console.error('[MIGRATION] Failed to add query_preview/user_id columns to usage_log:', err.message);
+      console.error('[MIGRATION] Failed to add query_text/user_id columns to usage_log:', err.message);
     }
 
     // Migration: create session_ownership table for multi-user session isolation
@@ -684,10 +683,10 @@ const appConfigDb = {
 };
 
 const usageDb = {
-  log: (sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd = 0, queryPreview = null, userId = null) => {
+  log: (sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd = 0, queryText = null, userId = null) => {
     db.prepare(
-      'INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, query_preview, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd, queryPreview, userId);
+      'INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, query_text, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd, queryText, userId);
   },
 
   getSessionsSummary: ({ from, to, model = null, sortBy = 'total_tokens', sortDir = 'desc', limit = 10, offset = 0 }) => {
@@ -715,7 +714,7 @@ const usageDb = {
         COUNT(*) AS turn_count,
         MIN(ul.created_at) AS first_turn,
         MAX(ul.created_at) AS last_turn,
-        (SELECT ul2.query_preview FROM usage_log ul2 WHERE ul2.session_id = ul.session_id AND ul2.query_preview IS NOT NULL AND ul2.query_preview != '' ORDER BY ul2.created_at ASC LIMIT 1) AS first_query_preview
+        (SELECT ul2.query_text FROM usage_log ul2 WHERE ul2.session_id = ul.session_id AND ul2.query_text IS NOT NULL AND ul2.query_text != '' ORDER BY ul2.created_at ASC LIMIT 1) AS first_query_text
       FROM usage_log ul
       LEFT JOIN session_names sn ON sn.session_id = ul.session_id AND sn.provider = 'claude'
       LEFT JOIN users u ON u.id = ul.user_id
@@ -751,7 +750,7 @@ const usageDb = {
   getSessionTurns: (sessionId, { limit = 10, offset = 0 } = {}) => {
     const rows = db.prepare(`
       SELECT
-        id, query_preview, model,
+        id, query_text, model,
         COALESCE(input_tokens, 0) AS input_tokens,
         COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
         COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens,

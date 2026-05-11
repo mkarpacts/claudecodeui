@@ -13,12 +13,12 @@ export type SessionSummary = {
   turn_count: number;
   first_turn: string;
   last_turn: string;
-  first_query_preview: string | null;
+  first_query_text: string | null;
 };
 
 export type SessionTurn = {
   id: number;
-  query_preview: string | null;
+  query_text: string | null;
   model: string | null;
   input_tokens: number;
   cache_read_tokens: number;
