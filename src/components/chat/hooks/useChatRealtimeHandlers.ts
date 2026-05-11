@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { PendingPermissionRequest } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import type { SessionStore, NormalizedMessage } from '../../../stores/useSessionStore';
+import { playNotificationSound } from '../../../utils/notificationSound';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -271,6 +272,19 @@ export function useChatRealtimeHandlers({
           // No special UI action needed beyond clearing loading state above
           // The backend already sent any abort-related messages
           break;
+        }
+
+        // Play notification sound if enabled
+        try {
+          const raw = localStorage.getItem('uiPreferences');
+          if (raw) {
+            const prefs = JSON.parse(raw);
+            if (prefs.soundOnComplete) {
+              playNotificationSound();
+            }
+          }
+        } catch {
+          // Ignore localStorage read errors
         }
 
         // Clear pending session

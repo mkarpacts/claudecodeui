@@ -1,6 +1,7 @@
-import { Bell, BellOff, BellRing, Loader2 } from 'lucide-react';
+import { Bell, BellOff, BellRing, Loader2, Volume2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { NotificationPreferencesState } from '../../types/types';
+import { useUiPreferences } from '../../../../hooks/useUiPreferences';
 
 type NotificationsSettingsTabProps = {
   notificationPreferences: NotificationPreferencesState;
@@ -22,6 +23,7 @@ export default function NotificationsSettingsTab({
   onDisablePush,
 }: NotificationsSettingsTabProps) {
   const { t } = useTranslation('settings');
+  const { preferences, setPreference } = useUiPreferences();
 
   const pushSupported = pushPermission !== 'unsupported';
   const pushDenied = pushPermission === 'denied';
@@ -137,6 +139,24 @@ export default function NotificationsSettingsTab({
               className="w-4 h-4"
             />
             {t('notifications.events.error')}
+          </label>
+        </div>
+      </div>
+
+      <div className="space-y-4 bg-card border border-border rounded-lg p-4">
+        <h4 className="font-medium text-foreground flex items-center gap-2">
+          <Volume2 className="w-4 h-4" />
+          {t('notifications.browserSound.title')}
+        </h4>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={preferences.soundOnComplete}
+              onChange={(event) => setPreference('soundOnComplete', event.target.checked)}
+              className="w-4 h-4"
+            />
+            {t('notifications.browserSound.playOnComplete')}
           </label>
         </div>
       </div>

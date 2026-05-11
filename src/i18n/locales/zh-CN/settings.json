@@ -126,6 +126,10 @@
       "actionRequired": "需要处理",
       "stop": "运行已停止",
       "error": "运行失败"
+    },
+    "browserSound": {
+      "title": "浏览器声音",
+      "playOnComplete": "响应完成时播放声音"
     }
   },
   "appearanceSettings": {

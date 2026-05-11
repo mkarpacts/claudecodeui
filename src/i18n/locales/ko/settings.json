@@ -126,6 +126,10 @@
       "actionRequired": "작업 필요",
       "stop": "실행 중지",
       "error": "실행 실패"
+    },
+    "browserSound": {
+      "title": "브라우저 알림음",
+      "playOnComplete": "응답 완료 시 알림음 재생"
     }
   },
   "appearanceSettings": {

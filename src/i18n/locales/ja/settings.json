@@ -126,6 +126,10 @@
       "actionRequired": "対応が必要",
       "stop": "実行停止",
       "error": "実行失敗"
+    },
+    "browserSound": {
+      "title": "ブラウザサウンド",
+      "playOnComplete": "応答完了時にサウンドを再生"
     }
   },
   "appearanceSettings": {
