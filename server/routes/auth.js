@@ -1,5 +1,6 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, isAdmin } from '../middleware/auth.js';
+import { permissionsDb } from '../database/db.js';
 import { isConfigured as isMicrosoftConfigured } from './auth-microsoft.js';
 
 const router = express.Router();
@@ -19,8 +20,13 @@ router.get('/status', async (req, res) => {
 
 // Get current user (protected route)
 router.get('/user', authenticateToken, (req, res) => {
+  const permissions = permissionsDb.getPermissions(req.user.id);
   res.json({
-    user: req.user
+    user: {
+      ...req.user,
+      permissions,
+      isAdmin: isAdmin(req.user),
+    },
   });
 });
 

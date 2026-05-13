@@ -1,5 +1,6 @@
 import express from 'express';
-import { usageDb } from '../database/db.js';
+import { usageDb, permissionsDb } from '../database/db.js';
+import { isAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -10,6 +11,14 @@ function getDefaultDateRange() {
     to: now.toISOString(),
   };
 }
+
+// Access guard: only admin or users with view_all_usage can access usage stats
+router.use((req, res, next) => {
+  if (isAdmin(req.user) || permissionsDb.hasPermission(req.user.id, 'view_all_usage')) {
+    return next();
+  }
+  return res.status(403).json({ error: 'Access denied' });
+});
 
 /**
  * GET /api/usage-stats/sessions
@@ -53,7 +62,6 @@ router.get('/sessions', (req, res) => {
 router.get('/summary', (req, res) => {
   try {
     const { from, to, model } = req.query;
-
     const defaults = getDefaultDateRange();
 
     const totals = usageDb.getTotals({

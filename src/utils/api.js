@@ -273,4 +273,19 @@ export const api = {
   gitSync: {
     status: () => authenticatedFetch('/api/git-sync/status'),
   },
+
+  // Admin endpoints
+  admin: {
+    getPermissions: () => authenticatedFetch('/api/admin/permissions'),
+    grantPermission: (userId, permissionKey) =>
+      authenticatedFetch('/api/admin/permissions', {
+        method: 'POST',
+        body: JSON.stringify({ userId, permissionKey }),
+      }),
+    revokePermission: (userId, permissionKey) =>
+      authenticatedFetch('/api/admin/permissions', {
+        method: 'DELETE',
+        body: JSON.stringify({ userId, permissionKey }),
+      }),
+  },
 };

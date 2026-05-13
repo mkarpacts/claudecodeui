@@ -1,7 +1,8 @@
-import { BarChart3, Bell, Bot, Coins, FolderSync, GitBranch, Key, ListChecks, Palette, Puzzle } from 'lucide-react';
+import { BarChart3, Bell, Bot, Coins, FolderSync, GitBranch, Key, ListChecks, Palette, Puzzle, Shield } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../../lib/utils';
 import { PillBar, Pill } from '../../../shared/view/ui';
+import { useAuth } from '../../../contexts/AuthContext';
 import type { SettingsMainTab } from '../types/types';
 
 type SettingsSidebarProps = {
@@ -25,18 +26,26 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'notifications', labelKey: 'mainTabs.notifications', icon: Bell },
   { id: 'usage', labelKey: 'mainTabs.usage', icon: BarChart3 },
   { id: 'sync', labelKey: 'mainTabs.sync', icon: FolderSync },
-  { id: 'tokenUsage', labelKey: 'mainTabs.tokenUsage', icon: Coins },
 ];
 
 export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebarProps) {
   const { t } = useTranslation('settings');
+  const { user, hasPermission } = useAuth();
+  const canViewUsage = user?.isAdmin || hasPermission('view_all_usage');
+  const navItems = canViewUsage
+    ? [
+        ...NAV_ITEMS,
+        { id: 'tokenUsage' as const, labelKey: 'mainTabs.tokenUsage', icon: Coins },
+        ...(user?.isAdmin ? [{ id: 'admin' as const, labelKey: 'mainTabs.admin', icon: Shield }] : []),
+      ]
+    : NAV_ITEMS;
 
   return (
     <>
       {/* Desktop sidebar */}
       <aside className="hidden w-56 flex-shrink-0 border-r border-border bg-muted/30 md:flex md:flex-col">
         <nav className="flex flex-col gap-1 p-3">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
 
@@ -62,7 +71,7 @@ export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebar
       {/* Mobile horizontal nav — pill bar */}
       <div className="flex-shrink-0 border-b border-border px-3 py-2 md:hidden">
         <PillBar className="scrollbar-hide w-full overflow-x-auto">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
 
             return (

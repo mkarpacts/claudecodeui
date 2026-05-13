@@ -176,6 +176,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [clearSession, token]);
 
+  const hasPermission = useCallback(
+    (key: string): boolean => {
+      if (!user) return false;
+      if (user.isAdmin) return true;
+      return user.permissions?.includes(key) ?? false;
+    },
+    [user],
+  );
+
   const contextValue = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -187,11 +196,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       loginWithMicrosoft,
       logout,
       refreshOnboardingStatus,
+      hasPermission,
     }),
     [
       authConfigured,
       error,
       hasCompletedOnboarding,
+      hasPermission,
       isLoading,
       loginWithMicrosoft,
       logout,

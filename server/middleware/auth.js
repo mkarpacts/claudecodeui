@@ -81,7 +81,8 @@ const generateToken = (user) => {
   return jwt.sign(
     {
       userId: user.id,
-      username: user.username
+      username: user.username,
+      email: user.email || null,
     },
     JWT_SECRET,
     { expiresIn: '7d' }
@@ -123,10 +124,27 @@ const authenticateWebSocket = (token) => {
   }
 };
 
+// Check if a user is admin (env var email match)
+const isAdmin = (user) => {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail || !user?.email) return false;
+  return user.email.toLowerCase() === adminEmail.toLowerCase();
+};
+
+// Middleware: require admin (ADMIN_EMAIL env var)
+const requireAdmin = (req, res, next) => {
+  if (!isAdmin(req.user)) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
 export {
   validateApiKey,
   authenticateToken,
   generateToken,
   authenticateWebSocket,
+  isAdmin,
+  requireAdmin,
   JWT_SECRET
 };

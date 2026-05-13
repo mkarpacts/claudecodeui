@@ -13,6 +13,7 @@ import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
 import UsageSettingsTab from '../view/tabs/UsageSettingsTab';
 import SyncStatusSettingsTab from '../view/tabs/SyncStatusSettingsTab';
 import TokenUsageTab from '../view/tabs/token-usage/TokenUsageTab';
+import AdminPermissionsTab from '../view/tabs/AdminPermissionsTab';
 import TasksSettingsTab from '../view/tabs/tasks-settings/TasksSettingsTab';
 import PluginSettingsTab from '../../plugins/view/PluginSettingsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
@@ -215,6 +216,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
               {activeTab === 'sync' && <SyncStatusSettingsTab />}
 
               {activeTab === 'tokenUsage' && <TokenUsageTab />}
+
+              {activeTab === 'admin' && <AdminPermissionsTab />}
             </div>
           </main>
         </div>

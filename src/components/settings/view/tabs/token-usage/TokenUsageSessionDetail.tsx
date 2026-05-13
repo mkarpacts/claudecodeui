@@ -66,7 +66,8 @@ export default function TokenUsageSessionDetail({ session, onBack }: Props) {
   }, [session.turn_count, session.total_tokens]);
 
   const totalPages = Math.ceil(total / perPage);
-  const sessionName = session.session_name || session.first_query_text || session.session_id.slice(0, 20) + '...';
+  const rawName = session.session_name || session.first_query_text || session.session_id.slice(0, 20) + '...';
+  const sessionName = rawName.length > 200 ? rawName.slice(0, 200) + '...' : rawName;
 
   return (
     <div className="space-y-6 md:space-y-8">

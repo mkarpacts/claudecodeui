@@ -213,6 +213,19 @@ const runMigrations = () => {
     )`);
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ownership_user ON session_ownership(user_id, provider)');
 
+    // Migration: create user_permissions table for role-based access
+    db.exec(`CREATE TABLE IF NOT EXISTS user_permissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      permission_key TEXT NOT NULL,
+      granted_by INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (granted_by) REFERENCES users(id),
+      UNIQUE(user_id, permission_key)
+    )`);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id)');
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -278,7 +291,7 @@ const userDb = {
   // Get user by ID
   getUserById: (userId) => {
     try {
-      const row = db.prepare('SELECT id, username, created_at, last_login FROM users WHERE id = ? AND is_active = 1').get(userId);
+      const row = db.prepare('SELECT id, username, email, created_at, last_login FROM users WHERE id = ? AND is_active = 1').get(userId);
       return row;
     } catch (err) {
       throw err;
@@ -308,7 +321,7 @@ const userDb = {
 
   getFirstUser: () => {
     try {
-      const row = db.prepare('SELECT id, username, created_at, last_login FROM users WHERE is_active = 1 LIMIT 1').get();
+      const row = db.prepare('SELECT id, username, email, created_at, last_login FROM users WHERE is_active = 1 LIMIT 1').get();
       return row;
     } catch (err) {
       throw err;
@@ -806,6 +819,41 @@ const sessionOwnershipDb = {
   },
 };
 
+const permissionsDb = {
+  getPermissions: (userId) => {
+    const rows = db.prepare('SELECT permission_key FROM user_permissions WHERE user_id = ?').all(userId);
+    return rows.map(r => r.permission_key);
+  },
+
+  hasPermission: (userId, key) => {
+    const row = db.prepare('SELECT 1 FROM user_permissions WHERE user_id = ? AND permission_key = ?').get(userId, key);
+    return !!row;
+  },
+
+  grantPermission: (userId, key, grantedBy) => {
+    db.prepare(
+      'INSERT OR IGNORE INTO user_permissions (user_id, permission_key, granted_by) VALUES (?, ?, ?)'
+    ).run(userId, key, grantedBy);
+  },
+
+  revokePermission: (userId, key) => {
+    db.prepare('DELETE FROM user_permissions WHERE user_id = ? AND permission_key = ?').run(userId, key);
+  },
+
+  getAllUsersWithPermissions: () => {
+    const users = db.prepare(
+      'SELECT id, username, email FROM users WHERE is_active = 1 ORDER BY username'
+    ).all();
+    const perms = db.prepare('SELECT user_id, permission_key FROM user_permissions').all();
+    const permMap = {};
+    for (const p of perms) {
+      if (!permMap[p.user_id]) permMap[p.user_id] = [];
+      permMap[p.user_id].push(p.permission_key);
+    }
+    return users.map(u => ({ ...u, permissions: permMap[u.id] || [] }));
+  },
+};
+
 export {
   db,
   initializeDatabase,
@@ -819,5 +867,6 @@ export {
   appConfigDb,
   usageDb,
   sessionOwnershipDb,
+  permissionsDb,
   githubTokensDb // Backward compatibility
 };

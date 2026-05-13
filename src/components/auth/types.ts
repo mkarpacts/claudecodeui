@@ -3,6 +3,9 @@ import type { ReactNode } from 'react';
 export type AuthUser = {
   id?: number | string;
   username: string;
+  email?: string;
+  permissions?: string[];
+  isAdmin?: boolean;
   [key: string]: unknown;
 };
 
@@ -42,6 +45,7 @@ export type AuthContextValue = {
   loginWithMicrosoft: () => void;
   logout: () => void;
   refreshOnboardingStatus: () => Promise<void>;
+  hasPermission: (key: string) => boolean;
 };
 
 export type AuthProviderProps = {
