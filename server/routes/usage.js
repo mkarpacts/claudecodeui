@@ -36,7 +36,8 @@ async function fetchRateLimits(accessToken) {
       method: 'POST',
       signal: controller.signal,
       headers: {
-        'x-api-key': accessToken,
+        'Authorization': `Bearer ${accessToken}`,
+        'anthropic-beta': 'oauth-2025-04-20',
         'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json',
       },
