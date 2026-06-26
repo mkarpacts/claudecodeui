@@ -28,11 +28,14 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   'text/plain', 'text/markdown', 'text/csv',
   'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',       // .xlsx
 ]);
 
 const ALLOWED_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
   '.txt', '.md', '.csv', '.pdf',
+  '.docx', '.xlsx',
 ]);
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -473,6 +476,8 @@ export function useChatComposerState({
       'text/markdown': ['.md'],
       'text/csv': ['.csv'],
       'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
     },
     maxSize: MAX_FILE_SIZE,
     maxFiles: MAX_FILES,

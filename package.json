@@ -36,7 +36,8 @@
     "release": "./release.sh",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test": "node --test \"server/services/attachments/**/*.test.js\""
   },
   "keywords": [
     "claude code",
@@ -104,7 +105,8 @@
     "sqlite3": "^5.1.7",
     "tailwind-merge": "^3.3.1",
     "web-push": "^3.6.7",
-    "ws": "^8.14.2"
+    "ws": "^8.14.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.4.3",

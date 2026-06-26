@@ -74,6 +74,8 @@ import adminRoutes from './routes/admin.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb } from './database/db.js';
+import { processAttachment } from './services/attachments/index.js';
+import { OFFICE, LEGACY_OFFICE_EXTS, MAX_FILE_SIZE } from './services/attachments/constants.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -2285,31 +2287,32 @@ app.post('/api/projects/:projectName/upload-attachments', authenticateToken, asy
             'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
             'text/plain', 'text/markdown', 'text/csv',
             'application/pdf',
+            OFFICE.docx.mime, OFFICE.xlsx.mime,
         ];
 
         const allowedExts = new Set([
             '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
             '.txt', '.md', '.csv', '.pdf',
+            OFFICE.docx.ext, OFFICE.xlsx.ext,
         ]);
 
         const fileFilter = (req, file, cb) => {
-            if (allowedMimes.includes(file.mimetype)) {
-                cb(null, true);
-            } else {
-                const ext = path.extname(file.originalname).toLowerCase();
-                if (allowedExts.has(ext)) {
-                    cb(null, true);
-                } else {
-                    cb(new Error('Invalid file type. Allowed: images, txt, md, csv, pdf.'));
-                }
+            const ext = path.extname(file.originalname).toLowerCase();
+            if (LEGACY_OFFICE_EXTS.has(ext)) {
+                return cb(new Error('Legacy .doc/.xls is not supported. Re-save as .docx/.xlsx.'));
             }
+            // Accept by MIME OR extension — browser MIME for OOXML is unreliable.
+            if (allowedMimes.includes(file.mimetype) || allowedExts.has(ext)) {
+                return cb(null, true);
+            }
+            cb(new Error('Invalid file type. Allowed: images, txt, md, csv, pdf, docx, xlsx.'));
         };
 
         const upload = multer({
             storage,
             fileFilter,
             limits: {
-                fileSize: 10 * 1024 * 1024, // 10MB
+                fileSize: MAX_FILE_SIZE, // 10MB, shared with client
                 files: 5
             }
         });
@@ -2325,32 +2328,23 @@ app.post('/api/projects/:projectName/upload-attachments', authenticateToken, asy
             }
 
             try {
-                // Process uploaded attachments
                 const processedAttachments = await Promise.all(
                     req.files.map(async (file) => {
-                        // Read file and convert to base64
                         const buffer = await fs.readFile(file.path);
-                        const base64 = buffer.toString('base64');
-                        const mimeType = file.mimetype;
-
-                        // Clean up temp file immediately
-                        await fs.unlink(file.path);
-
-                        return {
+                        await fs.unlink(file.path).catch(() => {});
+                        return processAttachment({
+                            buffer,
                             name: file.originalname,
-                            data: `data:${mimeType};base64,${base64}`,
-                            size: file.size,
-                            mimeType: mimeType
-                        };
+                            mimeType: file.mimetype,
+                        });
                     })
                 );
 
                 res.json({ attachments: processedAttachments });
             } catch (error) {
                 console.error('Error processing attachments:', error);
-                // Clean up any remaining files
-                await Promise.all(req.files.map(f => fs.unlink(f.path).catch(() => { })));
-                res.status(500).json({ error: 'Failed to process attachments' });
+                await Promise.all(req.files.map((f) => fs.unlink(f.path).catch(() => {})));
+                res.status(400).json({ error: error.message || 'Failed to process attachments' });
             }
         });
     } catch (error) {
