@@ -5,6 +5,10 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants.js';
 import { parseFrontmatter } from '../utils/frontmatter.js';
+import { pluginCommandDirs } from '../lib/pluginConfig.js';
+import { skillsCache } from '../lib/skillsCache.js';
+import { currentSkillsVersion } from '../lib/skillsVersion.js';
+import { buildSkillEntries, dedupeByName } from '../lib/commandListBuilder.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -429,16 +433,29 @@ router.post('/list', async (req, res) => {
     );
     allCommands.push(...userCommands);
 
+    // Plugin commands (namespace 'cts'). On by default; set CLAUDE_PLUGIN_COMMAND_SCAN=false to
+    // disable (e.g. if the Phase 0 spike finds supportedCommands() already yields plugin commands).
+    if (process.env.CLAUDE_PLUGIN_COMMAND_SCAN !== 'false') {
+      for (const dir of pluginCommandDirs(process.env.CLAUDE_PLUGINS)) {
+        const pluginCmds = await scanCommandsDirectory(dir, dir, 'cts');
+        allCommands.push(...pluginCmds);
+      }
+    }
+
     // Separate built-in and custom commands
     const customCommands = allCommands.filter(cmd => cmd.namespace !== 'builtin');
 
     // Sort commands alphabetically by name
     customCommands.sort((a, b) => a.name.localeCompare(b.name));
 
+    const cachedSkills = skillsCache.get(currentSkillsVersion()) || [];
+    const skills = dedupeByName(buildSkillEntries(cachedSkills));
+
     res.json({
       builtIn: builtInCommands,
       custom: customCommands,
-      count: allCommands.length
+      skills,
+      count: allCommands.length + skills.length
     });
   } catch (error) {
     console.error('Error listing commands:', error);

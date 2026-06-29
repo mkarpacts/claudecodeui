@@ -27,6 +27,9 @@ import {
 import { claudeAdapter } from './providers/claude/adapter.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { usageDb, sessionOwnershipDb } from './database/db.js';
+import { pluginConfigsFromEnv } from './lib/pluginConfig.js';
+import { skillsCache } from './lib/skillsCache.js';
+import { currentSkillsVersion } from './lib/skillsVersion.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -209,6 +212,12 @@ function mapCliOptionsToSDK(options = {}) {
   // Map setting sources for CLAUDE.md loading
   // This loads CLAUDE.md from project, user (~/.config/claude/CLAUDE.md), and local directories
   sdkOptions.settingSources = ['project', 'user', 'local'];
+
+  // Load external plugins (skills + commands + hooks) from CLAUDE_PLUGINS (comma-separated plugin roots)
+  const pluginConfigs = pluginConfigsFromEnv(process.env.CLAUDE_PLUGINS);
+  if (pluginConfigs.length) {
+    sdkOptions.plugins = pluginConfigs;
+  }
 
   // Map resume session
   if (sessionId) {
@@ -716,6 +725,22 @@ async function queryClaudeSDK(command, options = {}, ws) {
     console.log(`${logPrefix} Creating query instance (cwd: ${options.cwd || 'none'}, permissionMode: ${sdkOptions.permissionMode || 'default'})`);
     const queryCreateStart = Date.now();
     let queryInstance = createQueryInstance();
+
+    // Cache the runtime skill list once per session (cheap — plugins already loaded here).
+    // Single source of truth for the /-menu skills. Fire-and-forget + try/catch:
+    // a supportedCommands() failure must never break the chat — it only leaves the cache empty.
+    (async () => {
+      try {
+        if (typeof queryInstance.supportedCommands === 'function') {
+          const skills = await queryInstance.supportedCommands();
+          skillsCache.set(currentSkillsVersion(), skills);
+          console.log(`${logPrefix} Cached ${skills.length} runtime skills/commands`);
+        }
+      } catch (e) {
+        console.warn(`${logPrefix} supportedCommands() failed:`, e?.message || e);
+      }
+    })();
+
     console.log(`${logPrefix} Query instance created (${Date.now() - queryCreateStart}ms)`);
 
     // Restore immediately — Query constructor already captured the value

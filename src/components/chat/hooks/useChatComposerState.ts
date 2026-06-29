@@ -287,6 +287,21 @@ export function useChatComposerState({
         return;
       }
 
+      // Skills can't be invoked by a literal slash: handleSubmit owns "/..." input and never
+      // forwards it to the SDK. Send a natural-language instruction instead — the model then
+      // invokes the Skill tool. Deferred (mirrors handleCustomCommand) so it survives the
+      // synchronous setInput('') that handleSubmit runs after calling executeCommand.
+      if (command.namespace === 'skill') {
+        const skillName = command.name.replace(/^\//, '');
+        const prompt = `Use the ${skillName} skill.`;
+        setTimeout(() => {
+          setInput(prompt);
+          inputValueRef.current = prompt;
+          handleSubmitRef.current?.(createFakeSubmitEvent());
+        }, 0);
+        return;
+      }
+
       try {
         const effectiveInput = rawInput ?? input;
         const commandMatch = effectiveInput.match(new RegExp(`${escapeRegExp(command.name)}\\s*(.*)`));
