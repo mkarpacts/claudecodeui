@@ -1,5 +1,9 @@
 export const AUTH_TOKEN_STORAGE_KEY = 'auth-token';
 
+// Single source for reading the auth token. REST responses auto-refresh the token
+// into localStorage (X-Refreshed-Token), so storage is always fresher than React state.
+export const readStoredToken = (): string | null => localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+
 export const AUTH_ERROR_MESSAGES = {
   authStatusCheckFailed: 'Failed to check authentication status',
   authFailed: 'Authentication failed. Please try again.',

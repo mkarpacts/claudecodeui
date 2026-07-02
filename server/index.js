@@ -1529,6 +1529,16 @@ function handlePluginWsProxy(clientWs, pathname) {
     });
 }
 
+// nginx proxy_read_timeout (300s) kills WS tunnels that stay silent — and an idle chat
+// or terminal generates no traffic. Protocol-level pings (browsers auto-reply with pong)
+// keep every WS path (/ws, /shell, /plugin-ws) alive without any client-side code.
+const WS_KEEPALIVE_INTERVAL_MS = 30_000;
+setInterval(() => {
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) client.ping();
+    });
+}, WS_KEEPALIVE_INTERVAL_MS);
+
 // WebSocket connection handler that routes based on URL path
 wss.on('connection', (ws, request) => {
     const url = request.url;
@@ -1599,6 +1609,8 @@ function handleChatConnection(ws, request) {
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message);
+
+            if (data.type === 'ping') return; // tolerate app-level client pings (keepalive is server-side, see wss heartbeat)
 
             if (data.type === 'claude-command') {
                 console.log('[DEBUG] User message:', data.command || '[Continue/Resume]');

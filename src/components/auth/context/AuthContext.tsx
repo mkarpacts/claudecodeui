@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
-import { AUTH_ERROR_MESSAGES, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY } from '../constants';
+import { AUTH_ERROR_MESSAGES, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY, readStoredToken } from '../constants';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -13,8 +13,6 @@ import type {
 import { parseJsonSafely } from '../utils';
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-const readStoredToken = (): string | null => localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
 
 const persistToken = (token: string) => {
   localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);

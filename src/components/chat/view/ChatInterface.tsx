@@ -11,6 +11,7 @@ import { useChatComposerState } from '../hooks/useChatComposerState';
 import { useSessionStore } from '../../../stores/useSessionStore';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
+import ConnectionLostBanner from './subcomponents/ConnectionLostBanner';
 
 
 type PendingViewSession = {
@@ -340,6 +341,8 @@ function ChatInterface({
           selectedProject={selectedProject}
           isLoading={isLoading}
         />
+
+        <ConnectionLostBanner />
 
         <ChatComposer
           pendingPermissionRequests={pendingPermissionRequests}
