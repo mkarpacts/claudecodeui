@@ -34,7 +34,6 @@ export default function AppContent() {
     sidebarOpen,
     isLoadingProjects,
     isInputFocused,
-    externalMessageUpdate,
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,
@@ -45,9 +44,7 @@ export default function AppContent() {
   } = useProjectsState({
     sessionId,
     navigate,
-    latestMessage,
     isMobile,
-    activeSessions,
   });
 
   useEffect(() => {
@@ -180,7 +177,6 @@ export default function AppContent() {
           onReplaceTemporarySession={replaceTemporarySession}
           onNavigateToSession={(targetSessionId: string) => navigate(`/session/${targetSessionId}`)}
           onShowSettings={() => setShowSettings(true)}
-          externalMessageUpdate={externalMessageUpdate}
         />
       </div>
 

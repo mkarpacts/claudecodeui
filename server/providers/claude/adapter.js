@@ -5,7 +5,8 @@
  * @module adapters/claude
  */
 
-import { getSessionMessages } from '../../projects.js';
+import { getSessionMessages, getSessionMessagesFromFile } from '../../projects.js';
+import { sessionsMetaDb, sessionOwnershipDb } from '../../database/db.js';
 import { createNormalizedMessage, generateMessageId } from '../types.js';
 import { isInternalContent } from '../utils.js';
 
@@ -211,17 +212,30 @@ export const claudeAdapter = {
    * Fetch session history from JSONL files, returning normalized messages.
    */
   async fetchHistory(sessionId, opts = {}) {
-    const { projectName, limit = null, offset = 0 } = opts;
+    const { projectName, limit = null, offset = 0, userId = null, isAdmin = false } = opts;
     if (!projectName) {
       return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
     }
 
-    let result;
-    try {
-      result = await getSessionMessages(projectName, sessionId, limit, offset);
-    } catch (error) {
-      console.warn(`[ClaudeAdapter] Failed to load session ${sessionId}:`, error.message);
-      return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+    let result = null;
+    const metaRow = sessionsMetaDb.getById(sessionId);
+    if (metaRow) {
+      try {
+        result = await getSessionMessagesFromFile(metaRow.file_path, sessionId, limit, offset);
+        if (result.total === 0) result = null; // not in that file → cold fallback
+      } catch (e) { console.warn('[ClaudeAdapter] single-file read failed:', e.message); result = null; }
+    }
+    if (!result) {
+      // Cold fallback scans the whole project: enforce ownership explicitly (spec requirement)
+      const owned = userId != null && sessionOwnershipDb.getUserSessionIds(userId, 'claude').has(sessionId);
+      if (!owned && !isAdmin) return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      console.warn(`[ClaudeAdapter] cold fallback full scan for session ${sessionId}`);
+      try {
+        result = await getSessionMessages(projectName, sessionId, limit, offset);
+      } catch (error) {
+        console.warn(`[ClaudeAdapter] Failed to load session ${sessionId}:`, error.message);
+        return { messages: [], total: 0, hasMore: false, offset: 0, limit: null };
+      }
     }
 
     // getSessionMessages returns either an array (no limit) or { messages, total, hasMore }

@@ -42,8 +42,19 @@ export const api = {
   // Protected endpoints
   // config endpoint removed - no longer needed (frontend uses window.location)
   projects: () => authenticatedFetch('/api/projects'),
-  sessions: (projectName, limit = 5, offset = 0) =>
-    authenticatedFetch(`/api/projects/${projectName}/sessions?limit=${limit}&offset=${offset}`),
+  /**
+   * @param {string} projectName
+   * @param {number} limit
+   * @param {{ lastActivity: string; sessionId: string } | null} [cursor]
+   */
+  sessions: (projectName, limit = 20, cursor = null) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) {
+      params.set('cursorLast', cursor.lastActivity);
+      params.set('cursorId', cursor.sessionId);
+    }
+    return authenticatedFetch(`/api/projects/${encodeURIComponent(projectName)}/sessions?${params}`);
+  },
   // Unified endpoint — all providers through one URL
   unifiedSessionMessages: (sessionId, provider = 'claude', { projectName = '', projectPath = '', limit = null, offset = 0 } = {}) => {
     const params = new URLSearchParams();

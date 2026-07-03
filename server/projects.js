@@ -66,7 +66,9 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
 import sessionManager from './sessionManager.js';
-import { applyCustomSessionNames } from './database/db.js';
+import { applyCustomSessionNames, sessionsMetaDb } from './database/db.js';
+import { encodeProjectName } from './database/sessionsMeta.js';
+import { isSessionTranscript } from './services/sessionsLiveness.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -198,10 +200,13 @@ async function detectTaskMasterFolder(projectPath) {
 
 // Cache for extracted project directories
 const projectDirectoryCache = new Map();
+// Cache for generated display names (keyed by projectName|fullPath — reads package.json)
+const displayNameCache = new Map();
 
-// Clear cache when needed (called when project files change)
+// Clear caches when needed (called when project files change)
 function clearProjectDirectoryCache() {
   projectDirectoryCache.clear();
+  displayNameCache.clear();
 }
 
 // Load project configuration file
@@ -238,6 +243,16 @@ async function generateDisplayName(projectName, actualProjectDir = null) {
   // Use actual project directory if provided, otherwise decode from project name
   let projectPath = actualProjectDir || projectName.replace(/-/g, '/');
 
+  // Hot path: /api/projects calls this per project — cache the package.json read
+  // (invalidated together with projectDirectoryCache).
+  const cacheKey = `${projectName}|${projectPath}`;
+  if (displayNameCache.has(cacheKey)) return displayNameCache.get(cacheKey);
+  const name = await computeDisplayName(projectPath);
+  displayNameCache.set(cacheKey, name);
+  return name;
+}
+
+async function computeDisplayName(projectPath) {
   // Try to read package.json from the project path
   try {
     const packageJsonPath = path.join(projectPath, 'package.json');
@@ -262,134 +277,85 @@ async function generateDisplayName(projectName, actualProjectDir = null) {
   return projectPath;
 }
 
-// Extract the actual project directory from JSONL sessions (with caching)
-async function extractProjectDirectory(projectName) {
-  // Check cache first
+// Bounded fallback when neither config nor sessions_meta know the project's cwd
+// (e.g. orphan-only projects skipped by backfill): read the newest few JSONL files
+// and take the first cwd entry. The dir-name decode is lossy ('.' and '-' in real
+// paths both become '-'), so an on-disk probe is the only reliable source here.
+const PROBE_MAX_FILES = 3;
+const PROBE_MAX_LINES = 50;
+async function probeProjectCwd(projectName, { projectsRoot = path.join(os.homedir(), '.claude', 'projects') } = {}) {
+  const projectDir = path.join(projectsRoot, projectName);
+  let files;
+  try {
+    files = (await fs.readdir(projectDir)).filter(isSessionTranscript);
+  } catch {
+    return null;
+  }
+  const withMtime = (await Promise.all(files.map(async (f) => {
+    try {
+      const st = await fs.stat(path.join(projectDir, f));
+      return { f, mtime: st.mtimeMs };
+    } catch {
+      return null;
+    }
+  }))).filter(Boolean).sort((a, b) => b.mtime - a.mtime);
+
+  for (const { f } of withMtime.slice(0, PROBE_MAX_FILES)) {
+    const rl = readline.createInterface({ input: fsSync.createReadStream(path.join(projectDir, f)), crlfDelay: Infinity });
+    let lines = 0;
+    try {
+      for await (const line of rl) {
+        if (++lines > PROBE_MAX_LINES) break;
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.cwd) return entry.cwd;
+        } catch { /* skip malformed */ }
+      }
+    } catch { /* unreadable file — try the next one */ } finally {
+      rl.close();
+    }
+  }
+  return null;
+}
+
+// Resolve a project's working directory — the ONE place that owns the precedence:
+// config originalPath -> latest session cwd from sessions_meta -> newest-file probe -> decoded dir name.
+// Bulk callers (listProjectsLight) can pass preloaded { config, latestCwd } to avoid
+// re-reading project-config.json / re-querying sessions_meta per project.
+async function extractProjectDirectory(projectName, { config = null, latestCwd = undefined } = {}) {
   if (projectDirectoryCache.has(projectName)) {
     return projectDirectoryCache.get(projectName);
   }
-
-  // Check project config for originalPath (manually added projects via UI or platform)
-  // This handles projects with dashes in their directory names correctly
-  const config = await loadProjectConfig();
-  if (config[projectName]?.originalPath) {
-    const originalPath = config[projectName].originalPath;
-    projectDirectoryCache.set(projectName, originalPath);
-    return originalPath;
-  }
-
-  const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
-  const cwdCounts = new Map();
-  let latestTimestamp = 0;
-  let latestCwd = null;
-  let extractedPath;
-
-  try {
-    // Check if the project directory exists
-    await fs.access(projectDir);
-
-    const files = await fs.readdir(projectDir);
-    const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
-
-    if (jsonlFiles.length === 0) {
-      // Fall back to decoded project name if no sessions
-      extractedPath = projectName.replace(/-/g, '/');
+  if (!config) config = await loadProjectConfig();
+  let result = config[projectName]?.originalPath;
+  if (!result) {
+    if (latestCwd !== undefined) {
+      result = latestCwd;
     } else {
-      // Process all JSONL files to collect cwd values
-      for (const file of jsonlFiles) {
-        const jsonlFile = path.join(projectDir, file);
-        const fileStream = fsSync.createReadStream(jsonlFile);
-        const rl = readline.createInterface({
-          input: fileStream,
-          crlfDelay: Infinity
-        });
-
-        for await (const line of rl) {
-          if (line.trim()) {
-            try {
-              const entry = JSON.parse(line);
-
-              if (entry.cwd) {
-                // Count occurrences of each cwd
-                cwdCounts.set(entry.cwd, (cwdCounts.get(entry.cwd) || 0) + 1);
-
-                // Track the most recent cwd
-                const timestamp = new Date(entry.timestamp || 0).getTime();
-                if (timestamp > latestTimestamp) {
-                  latestTimestamp = timestamp;
-                  latestCwd = entry.cwd;
-                }
-              }
-            } catch (parseError) {
-              // Skip malformed lines
-            }
-          }
-        }
-      }
-
-      // Determine the best cwd to use
-      if (cwdCounts.size === 0) {
-        // No cwd found, fall back to decoded project name
-        extractedPath = projectName.replace(/-/g, '/');
-      } else if (cwdCounts.size === 1) {
-        // Only one cwd, use it
-        extractedPath = Array.from(cwdCounts.keys())[0];
-      } else {
-        // Multiple cwd values - prefer the most recent one if it has reasonable usage
-        const mostRecentCount = cwdCounts.get(latestCwd) || 0;
-        const maxCount = Math.max(...cwdCounts.values());
-
-        // Use most recent if it has at least 25% of the max count
-        if (mostRecentCount >= maxCount * 0.25) {
-          extractedPath = latestCwd;
-        } else {
-          // Otherwise use the most frequently used cwd
-          for (const [cwd, count] of cwdCounts.entries()) {
-            if (count === maxCount) {
-              extractedPath = cwd;
-              break;
-            }
-          }
-        }
-
-        // Fallback (shouldn't reach here)
-        if (!extractedPath) {
-          extractedPath = latestCwd || projectName.replace(/-/g, '/');
-        }
+      try {
+        result = sessionsMetaDb.latestCwdForProject(projectName);
+      } catch (e) {
+        console.warn('[projects] latestCwdForProject failed:', e.message);
+        result = null;
       }
     }
-
-    // Cache the result
-    projectDirectoryCache.set(projectName, extractedPath);
-
-    return extractedPath;
-
-  } catch (error) {
-    // If the directory doesn't exist, just use the decoded project name
-    if (error.code === 'ENOENT') {
-      extractedPath = projectName.replace(/-/g, '/');
-    } else {
-      console.error(`Error extracting project directory for ${projectName}:`, error);
-      // Fall back to decoded project name for other errors
-      extractedPath = projectName.replace(/-/g, '/');
-    }
-
-    // Cache the fallback result too
-    projectDirectoryCache.set(projectName, extractedPath);
-
-    return extractedPath;
   }
+  if (!result) {
+    result = await probeProjectCwd(projectName);
+  }
+  if (!result) return projectName.replace(/-/g, '/'); // don't cache the lossy fallback — a real cwd may appear later
+  projectDirectoryCache.set(projectName, result);
+  return result;
 }
 
-async function getProjects(progressCallback = null) {
+async function getProjects() {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
   const config = await loadProjectConfig();
   const projects = [];
   const existingProjects = new Set();
   const existingPaths = new Set(); // actual resolved paths — used to dedup manual projects with different encoding
   const codexSessionsIndexRef = { sessionsByProject: null };
-  let totalProjects = 0;
-  let processedProjects = 0;
   let directories = [];
 
   try {
@@ -403,26 +369,7 @@ async function getProjects(progressCallback = null) {
     // Build set of existing project names for later
     directories.forEach(e => existingProjects.add(e.name));
 
-    // Count manual projects not already in directories
-    const manualProjectsCount = Object.entries(config)
-      .filter(([name, cfg]) => cfg.manuallyAdded && !existingProjects.has(name))
-      .length;
-
-    totalProjects = directories.length + manualProjectsCount;
-
     for (const entry of directories) {
-      processedProjects++;
-
-      // Emit progress
-      if (progressCallback) {
-        progressCallback({
-          phase: 'loading',
-          current: processedProjects,
-          total: totalProjects,
-          currentProject: entry.name
-        });
-      }
-
       // Extract actual project directory from JSONL sessions
       const actualProjectDir = await extractProjectDirectory(entry.name);
       if (actualProjectDir) existingPaths.add(path.resolve(actualProjectDir));
@@ -522,10 +469,6 @@ async function getProjects(progressCallback = null) {
     if (error.code !== 'ENOENT') {
       console.error('Error reading projects directory:', error);
     }
-    // Calculate total for manual projects only (no directories exist)
-    totalProjects = Object.entries(config)
-      .filter(([name, cfg]) => cfg.manuallyAdded)
-      .length;
   }
 
   // Add manually configured projects that don't exist as folders yet
@@ -533,18 +476,6 @@ async function getProjects(progressCallback = null) {
     if (!projectConfig.manuallyAdded) continue;
     const manualPath = projectConfig.originalPath ? path.resolve(projectConfig.originalPath) : null;
     if (existingProjects.has(projectName) || (manualPath && existingPaths.has(manualPath))) continue;
-
-    processedProjects++;
-
-      // Emit progress for manual projects
-      if (progressCallback) {
-        progressCallback({
-          phase: 'loading',
-          current: processedProjects,
-          total: totalProjects,
-          currentProject: projectName
-        });
-      }
 
       // Use the original path if available, otherwise extract from potential sessions
       let actualProjectDir = projectConfig.originalPath;
@@ -631,15 +562,6 @@ async function getProjects(progressCallback = null) {
       }
 
     projects.push(project);
-  }
-
-  // Emit completion after all projects (including manual) are processed
-  if (progressCallback) {
-    progressCallback({
-      phase: 'complete',
-      current: totalProjects,
-      total: totalProjects
-    });
   }
 
   return projects;
@@ -810,6 +732,12 @@ async function parseJsonlSessions(filePath) {
             }
 
             const session = sessions.get(entry.sessionId);
+
+            // The first entry of a session may lack cwd (e.g. queue-operation lines) —
+            // pick it up from the first entry that has one.
+            if (!session.cwd && entry.cwd) {
+              session.cwd = entry.cwd;
+            }
 
             // Apply pending summary if this entry has a parentUuid that matches a pending summary
             if (session.summary === 'New Session' && entry.parentUuid && pendingSummaries.has(entry.parentUuid)) {
@@ -983,101 +911,80 @@ async function parseAgentTools(filePath) {
   return tools;
 }
 
+// Attach subagent tool history (agent-<id>.jsonl) to their parent Task messages.
+async function attachAgentTools(messages, projectDir) {
+  const byAgentId = new Map(); // agentId -> messages referencing it (single pass)
+  for (const m of messages) {
+    const agentId = m.toolUseResult?.agentId;
+    if (!agentId) continue;
+    if (!byAgentId.has(agentId)) byAgentId.set(agentId, []);
+    byAgentId.get(agentId).push(m);
+  }
+  await Promise.all([...byAgentId].map(async ([agentId, agentMessages]) => {
+    try {
+      const tools = await parseAgentTools(path.join(projectDir, `agent-${agentId}.jsonl`));
+      if (tools.length > 0) for (const m of agentMessages) m.subagentTools = tools;
+    } catch { /* agent file absent/unreadable — skip */ }
+  }));
+}
+
+// Append all entries of one session from a JSONL file into `messages`.
+// Filters by sessionId: legacy files may contain several sessions.
+async function collectSessionEntries(filePath, sessionId, messages) {
+  const rl = readline.createInterface({ input: fsSync.createReadStream(filePath), crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.sessionId === sessionId) messages.push(entry);
+    } catch { /* skip malformed (common with concurrent writes) */ }
+  }
+}
+
+// Sort chronologically and slice the tail: offset 0 = most recent page.
+function paginateTail(messages, limit, offset) {
+  messages.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+  const total = messages.length;
+  if (limit === null) return { messages, total, hasMore: false };
+  const startIndex = Math.max(0, total - offset - limit);
+  return { messages: messages.slice(startIndex, total - offset), total, hasMore: startIndex > 0, offset, limit };
+}
+
+// Read a single session file (fast path — file named <sessionId>.jsonl).
+async function getSessionMessagesFromFile(filePath, sessionId, limit = null, offset = 0) {
+  const messages = [];
+  try {
+    await collectSessionEntries(filePath, sessionId, messages);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { messages: [], total: 0, hasMore: false };
+    throw error;
+  }
+  await attachAgentTools(messages, path.dirname(filePath));
+  return paginateTail(messages, limit, offset);
+}
+
 // Get messages for a specific session with pagination support
 async function getSessionMessages(projectName, sessionId, limit = null, offset = 0) {
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
 
   try {
     const files = await fs.readdir(projectDir);
-    // agent-*.jsonl files contain subagent tool history - we'll process them separately
-    const jsonlFiles = files.filter(file => file.endsWith('.jsonl') && !file.startsWith('agent-'));
-    const agentFiles = files.filter(file => file.endsWith('.jsonl') && file.startsWith('agent-'));
+    // agent-*.jsonl files contain subagent tool history - processed via attachAgentTools helper
+    const jsonlFiles = files.filter(isSessionTranscript);
 
     if (jsonlFiles.length === 0) {
       return { messages: [], total: 0, hasMore: false };
     }
 
     const messages = [];
-    // Map of agentId -> tools for subagent tool grouping
-    const agentToolsCache = new Map();
-
-    // Process all JSONL files to find messages for this session
     for (const file of jsonlFiles) {
-      const jsonlFile = path.join(projectDir, file);
-      const fileStream = fsSync.createReadStream(jsonlFile);
-      const rl = readline.createInterface({
-        input: fileStream,
-        crlfDelay: Infinity
-      });
-
-      for await (const line of rl) {
-        if (line.trim()) {
-          try {
-            const entry = JSON.parse(line);
-            if (entry.sessionId === sessionId) {
-              messages.push(entry);
-            }
-          } catch (parseError) {
-            // Silently skip malformed JSONL lines (common with concurrent writes)
-          }
-        }
-      }
+      await collectSessionEntries(path.join(projectDir, file), sessionId, messages);
     }
+    await attachAgentTools(messages, projectDir);
 
-    // Collect agentIds from Task tool results
-    const agentIds = new Set();
-    for (const message of messages) {
-      if (message.toolUseResult?.agentId) {
-        agentIds.add(message.toolUseResult.agentId);
-      }
-    }
-
-    // Load agent tools for each agentId found
-    for (const agentId of agentIds) {
-      const agentFileName = `agent-${agentId}.jsonl`;
-      if (agentFiles.includes(agentFileName)) {
-        const agentFilePath = path.join(projectDir, agentFileName);
-        const tools = await parseAgentTools(agentFilePath);
-        agentToolsCache.set(agentId, tools);
-      }
-    }
-
-    // Attach agent tools to their parent Task messages
-    for (const message of messages) {
-      if (message.toolUseResult?.agentId) {
-        const agentId = message.toolUseResult.agentId;
-        const agentTools = agentToolsCache.get(agentId);
-        if (agentTools && agentTools.length > 0) {
-          message.subagentTools = agentTools;
-        }
-      }
-    }
-    // Sort messages by timestamp
-    const sortedMessages = messages.sort((a, b) =>
-      new Date(a.timestamp || 0) - new Date(b.timestamp || 0)
-    );
-
-    const total = sortedMessages.length;
-
-    // If no limit is specified, return all messages (backward compatibility)
-    if (limit === null) {
-      return sortedMessages;
-    }
-
-    // Apply pagination - for recent messages, we need to slice from the end
-    // offset 0 should give us the most recent messages
-    const startIndex = Math.max(0, total - offset - limit);
-    const endIndex = total - offset;
-    const paginatedMessages = sortedMessages.slice(startIndex, endIndex);
-    const hasMore = startIndex > 0;
-
-    return {
-      messages: paginatedMessages,
-      total,
-      hasMore,
-      offset,
-      limit
-    };
+    const page = paginateTail(messages, limit, offset);
+    // If no limit is specified, return the bare array (backward compatibility)
+    return limit === null ? page.messages : page;
   } catch (error) {
     console.error(`Error reading messages for session ${sessionId}:`, error);
     return limit === null ? [] : { messages: [], total: 0, hasMore: false };
@@ -1114,7 +1021,9 @@ async function deleteSession(projectName, sessionId) {
     const jsonlFiles = files.filter(file => file.endsWith('.jsonl'));
 
     if (jsonlFiles.length === 0) {
-      throw new Error('No session files found for this project');
+      const err = new Error('No session files found for this project');
+      err.code = 'SESSION_NOT_FOUND'; // structural signal — callers must not parse the message
+      throw err;
     }
 
     // Check all JSONL files to find which one contains the session
@@ -1150,8 +1059,11 @@ async function deleteSession(projectName, sessionId) {
       }
     }
 
-    throw new Error(`Session ${sessionId} not found in any files`);
+    const err = new Error(`Session ${sessionId} not found in any files`);
+    err.code = 'SESSION_NOT_FOUND';
+    throw err;
   } catch (error) {
+    if (error.code === 'ENOENT') error.code = 'SESSION_NOT_FOUND'; // project dir already gone
     console.error(`Error deleting session ${sessionId} from project ${projectName}:`, error);
     throw error;
   }
@@ -1236,8 +1148,9 @@ async function addProjectManually(projectPath, displayName = null) {
     throw new Error(`Path does not exist: ${absolutePath}`);
   }
 
-  // Generate project name (encode path for use as directory name)
-  const projectName = absolutePath.replace(/[\\/:\s~_]/g, '-');
+  // Canonical Claude CLI encoding — the previous ad-hoc regex kept dots etc. and
+  // produced twin config entries of CLI-created project dirs under another name.
+  const projectName = encodeProjectName(absolutePath);
 
   // Check if project already exists in config
   const config = await loadProjectConfig();
@@ -2555,6 +2468,7 @@ export {
   getProjects,
   getSessions,
   getSessionMessages,
+  getSessionMessagesFromFile,
   parseJsonlSessions,
   renameProject,
   deleteSession,
@@ -2562,8 +2476,10 @@ export {
   deleteProject,
   addProjectManually,
   loadProjectConfig,
+  generateDisplayName,
   saveProjectConfig,
   extractProjectDirectory,
+  probeProjectCwd,
   clearProjectDirectoryCache,
   getCodexSessions,
   getCodexSessionMessages,

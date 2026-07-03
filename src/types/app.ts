@@ -19,7 +19,7 @@ export interface ProjectSession {
 
 export interface ProjectSessionMeta {
   total?: number;
-  hasMore?: boolean;
+  lastActivity?: string | null;
   [key: string]: unknown;
 }
 
@@ -44,27 +44,35 @@ export interface Project {
   [key: string]: unknown;
 }
 
-export interface LoadingProgress {
-  type?: 'loading_progress';
-  phase?: string;
-  current: number;
-  total: number;
-  currentProject?: string;
+export interface SessionUpdatedMessage {
+  type: 'session_updated';
+  project: string;
+  session: {
+    id: string;
+    title: string | null;
+    last_activity: string;
+    message_count: number;
+  };
   [key: string]: unknown;
 }
 
-export interface ProjectsUpdatedMessage {
-  type: 'projects_updated';
-  projects: Project[];
-  changedFile?: string;
+export interface SessionRenamedMessage {
+  type: 'session_renamed';
+  project: string;
+  sessionId: string;
+  title: string;
   [key: string]: unknown;
 }
 
-export interface LoadingProgressMessage extends LoadingProgress {
-  type: 'loading_progress';
+export interface SessionDeletedMessage {
+  type: 'session_deleted';
+  project: string;
+  sessionId: string;
+  [key: string]: unknown;
 }
 
 export type AppSocketMessage =
-  | LoadingProgressMessage
-  | ProjectsUpdatedMessage
+  | SessionUpdatedMessage
+  | SessionRenamedMessage
+  | SessionDeletedMessage
   | { type?: string;[key: string]: unknown };

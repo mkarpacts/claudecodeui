@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { SESSIONS_META_SCHEMA, SESSION_OWNERSHIP_INDEX_SQL, createSessionsMetaDb, migrateSessionsMetaSoftDelete } from './sessionsMeta.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -58,6 +59,7 @@ if (DB_PATH !== LEGACY_DB_PATH && !fs.existsSync(DB_PATH) && fs.existsSync(LEGAC
 
 // Create database connection
 const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
 
 // app_config must exist before any other module imports (auth.js reads the JWT secret at load time).
 // runMigrations() also creates this table, but it runs too late for existing installations
@@ -67,6 +69,42 @@ db.exec(`CREATE TABLE IF NOT EXISTS app_config (
   value TEXT NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`);
+
+// The tables below must exist before createSessionsMetaDb() is called at module-level so that
+// better-sqlite3 can compile prepared statements (including FK cascade targets).
+// init.sql / runMigrations() also exec all of these — all are idempotent CREATE IF NOT EXISTS.
+db.exec(`CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT,
+  microsoft_id TEXT UNIQUE,
+  email TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_login DATETIME,
+  is_active BOOLEAN DEFAULT 1,
+  git_name TEXT,
+  git_email TEXT,
+  has_completed_onboarding BOOLEAN DEFAULT 0
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS session_ownership (
+  session_id TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'claude',
+  user_id INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(session_id, provider),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS session_names (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'claude',
+  custom_name TEXT NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(session_id, provider)
+)`);
+db.exec(SESSIONS_META_SCHEMA);
+migrateSessionsMetaSoftDelete(db); // adds deleted_at to tables created before 2026-07-03
 
 // Show app installation path prominently
 const appInstallPath = path.join(__dirname, '../..');
@@ -211,7 +249,11 @@ const runMigrations = () => {
       UNIQUE(session_id, provider),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )`);
-    db.exec('CREATE INDEX IF NOT EXISTS idx_session_ownership_user ON session_ownership(user_id, provider)');
+    // Migration: sessions_meta write-through metadata (perf redesign 2026-07)
+    db.exec(SESSIONS_META_SCHEMA);
+    db.exec(SESSION_OWNERSHIP_INDEX_SQL); // must run after session_ownership exists
+    // The 3-column index above makes the old (user_id, provider) prefix index redundant
+    db.exec('DROP INDEX IF EXISTS idx_session_ownership_user');
 
     // Migration: create user_permissions table for role-based access
     db.exec(`CREATE TABLE IF NOT EXISTS user_permissions (
@@ -817,7 +859,14 @@ const sessionOwnershipDb = {
         .all(userId, provider).map(r => r.session_id)
     );
   },
+
+  getAllOwnedSessionIds: (provider = 'claude') => {
+    const rows = db.prepare('SELECT session_id FROM session_ownership WHERE provider = ?').all(provider);
+    return new Set(rows.map(r => r.session_id));
+  },
 };
+
+const sessionsMetaDb = createSessionsMetaDb(db);
 
 const permissionsDb = {
   getPermissions: (userId) => {
@@ -867,6 +916,7 @@ export {
   appConfigDb,
   usageDb,
   sessionOwnershipDb,
+  sessionsMetaDb,
   permissionsDb,
   githubTokensDb // Backward compatibility
 };

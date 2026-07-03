@@ -44,7 +44,7 @@ import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
 
-import { getProjects, getSessions, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache, searchConversations } from './projects.js';
+import { renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache, searchConversations } from './projects.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval, getPendingApprovalsForSession, reconnectSessionWriter } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
@@ -73,235 +73,19 @@ import usageStatsRoutes from './routes/usage-stats.js';
 import adminRoutes from './routes/admin.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
-import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb } from './database/db.js';
+import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb, sessionsMetaDb } from './database/db.js';
+import { repairSessionsMeta } from './services/sessionsRepair.js';
+import { backfillSessionsMeta } from './services/sessionsBackfill.js';
 import { processAttachment } from './services/attachments/index.js';
+import { listProjectsLight } from './services/projectsList.js';
 import { OFFICE, LEGACY_OFFICE_EXTS, MAX_FILE_SIZE } from './services/attachments/constants.js';
 import { configureWebPush } from './services/vapid-keys.js';
-import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
+import { registerClient, unregisterClient, broadcastToUser } from './lib/wsHub.js';
+import { validateApiKey, authenticateToken, authenticateWebSocket, requireAdmin } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { getConnectableHost } from '../shared/networkHosts.js';
 
-/**
- * Filter project sessions by ownership (synchronous fallback).
- * Only filters the already-loaded batch; total/hasMore may be approximate.
- */
-function filterProjectsByOwner(projects, ownedIds) {
-    return projects.map(project => {
-        if (!project.sessions) return project;
-        const filtered = project.sessions.filter(s => ownedIds.has(s.id));
-        const removedByFilter = project.sessions.length - filtered.length;
-        // If we filtered out sessions or there are more on disk, signal hasMore
-        const hasMore = Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0;
-        return { ...project, sessions: filtered, sessionMeta: { hasMore, total: filtered.length } };
-    });
-}
-
-/**
- * Filter project sessions by ownership with re-fetch when needed (for HTTP endpoint).
- * When the initial batch doesn't contain enough owned sessions, re-fetches up to
- * MAX_REFETCH_SESSIONS sessions for that project to find the user's sessions.
- */
-const MAX_REFETCH_SESSIONS = 200;
-
-async function filterProjectsByOwnerAsync(projects, ownedIds, limit = 5) {
-    return Promise.all(projects.map(async project => {
-        if (!project.sessions) return project;
-
-        const filtered = project.sessions.filter(s => ownedIds.has(s.id));
-
-        // Re-fetch only when we don't have enough owned sessions to fill the page
-        // AND there might be more sessions available (either on disk or filtered out)
-        const removedByFilter = project.sessions.length - filtered.length;
-        const needsRefetch = filtered.length < limit && (Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0);
-        if (needsRefetch) {
-            try {
-                const allResult = await getSessions(project.name, MAX_REFETCH_SESSIONS, 0);
-                const allFiltered = allResult.sessions.filter(s => ownedIds.has(s.id));
-                return {
-                    ...project,
-                    sessions: allFiltered.slice(0, limit),
-                    sessionMeta: {
-                        // Signal hasMore if user has more than limit, OR if we hit
-                        // the cap and there are more sessions on disk we didn't scan
-                        hasMore: allFiltered.length > limit || allResult.hasMore,
-                        total: allFiltered.length
-                    }
-                };
-            } catch (e) {
-                console.warn(`[filterProjectsByOwnerAsync] Re-fetch failed for project ${project.name}:`, e.message);
-                // Fall through to basic filtering on error
-            }
-        }
-
-        return {
-            ...project,
-            sessions: filtered,
-            sessionMeta: {
-                hasMore: Boolean(project.sessionMeta?.hasMore) || removedByFilter > 0,
-                total: project.sessionMeta?.total || filtered.length
-            }
-        };
-    }));
-}
-
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
-
-// File system watchers for provider project/session folders
-const PROVIDER_WATCH_PATHS = [
-    { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
-    { provider: 'cursor', rootPath: path.join(os.homedir(), '.cursor', 'chats') },
-    { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
-    { provider: 'gemini', rootPath: path.join(os.homedir(), '.gemini', 'projects') },
-    { provider: 'gemini_sessions', rootPath: path.join(os.homedir(), '.gemini', 'sessions') }
-];
-const WATCHER_IGNORED_PATTERNS = [
-    '**/node_modules/**',
-    '**/.git/**',
-    '**/dist/**',
-    '**/build/**',
-    '**/*.tmp',
-    '**/*.swp',
-    '**/.DS_Store'
-];
-const WATCHER_DEBOUNCE_MS = 300;
-let projectsWatchers = [];
-let projectsWatcherDebounceTimer = null;
-const connectedClients = new Set();
-let isGetProjectsRunning = false; // Flag to prevent reentrant calls
-
-// Broadcast progress to all connected WebSocket clients
-function broadcastProgress(progress) {
-    const message = JSON.stringify({
-        type: 'loading_progress',
-        ...progress
-    });
-    connectedClients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-        }
-    });
-}
-
-// Setup file system watchers for Claude, Cursor, and Codex project/session folders
-async function setupProjectsWatcher() {
-    const chokidar = (await import('chokidar')).default;
-
-    if (projectsWatcherDebounceTimer) {
-        clearTimeout(projectsWatcherDebounceTimer);
-        projectsWatcherDebounceTimer = null;
-    }
-
-    await Promise.all(
-        projectsWatchers.map(async (watcher) => {
-            try {
-                await watcher.close();
-            } catch (error) {
-                console.error('[WARN] Failed to close watcher:', error);
-            }
-        })
-    );
-    projectsWatchers = [];
-
-    const debouncedUpdate = (eventType, filePath, provider, rootPath) => {
-        if (projectsWatcherDebounceTimer) {
-            clearTimeout(projectsWatcherDebounceTimer);
-        }
-
-        projectsWatcherDebounceTimer = setTimeout(async () => {
-            // Prevent reentrant calls
-            if (isGetProjectsRunning) {
-                return;
-            }
-
-            try {
-                isGetProjectsRunning = true;
-
-                // Clear project directory cache when files change
-                clearProjectDirectoryCache();
-
-                // Get updated projects list
-                const updatedProjects = await getProjects(broadcastProgress);
-
-                // Notify all connected clients about the project changes (filtered per user)
-                const timestamp = new Date().toISOString();
-                const changedFile = path.relative(rootPath, filePath);
-
-                // Group clients by userId → one DB query + one JSON.stringify per unique user
-                const clientsByUser = new Map();
-                connectedClients.forEach(client => {
-                    if (client.readyState !== WebSocket.OPEN) return;
-                    const uid = client._userId ?? null;
-                    if (!clientsByUser.has(uid)) clientsByUser.set(uid, []);
-                    clientsByUser.get(uid).push(client);
-                });
-
-                clientsByUser.forEach((clients, uid) => {
-                    let clientProjects = updatedProjects;
-                    if (uid !== null) {
-                        const ownedIds = sessionOwnershipDb.getUserSessionIds(uid, 'claude');
-                        clientProjects = filterProjectsByOwner(updatedProjects, ownedIds);
-                    }
-                    const msg = JSON.stringify({
-                        type: 'projects_updated',
-                        projects: clientProjects,
-                        timestamp,
-                        changeType: eventType,
-                        changedFile,
-                        watchProvider: provider
-                    });
-                    clients.forEach(c => c.send(msg));
-                });
-
-            } catch (error) {
-                console.error('[ERROR] Error handling project changes:', error);
-            } finally {
-                isGetProjectsRunning = false;
-            }
-        }, WATCHER_DEBOUNCE_MS);
-    };
-
-    for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {
-        try {
-            // chokidar v4 emits ENOENT via the "error" event for missing roots and will not auto-recover.
-            // Ensure provider folders exist before creating the watcher so watching stays active.
-            await fsPromises.mkdir(rootPath, { recursive: true });
-
-            // Initialize chokidar watcher with optimized settings
-            const watcher = chokidar.watch(rootPath, {
-                ignored: WATCHER_IGNORED_PATTERNS,
-                persistent: true,
-                ignoreInitial: true, // Don't fire events for existing files on startup
-                followSymlinks: false,
-                depth: 10, // Reasonable depth limit
-                awaitWriteFinish: {
-                    stabilityThreshold: 100, // Wait 100ms for file to stabilize
-                    pollInterval: 50
-                }
-            });
-
-            // Set up event listeners
-            watcher
-                .on('add', (filePath) => debouncedUpdate('add', filePath, provider, rootPath))
-                .on('change', (filePath) => debouncedUpdate('change', filePath, provider, rootPath))
-                .on('unlink', (filePath) => debouncedUpdate('unlink', filePath, provider, rootPath))
-                .on('addDir', (dirPath) => debouncedUpdate('addDir', dirPath, provider, rootPath))
-                .on('unlinkDir', (dirPath) => debouncedUpdate('unlinkDir', dirPath, provider, rootPath))
-                .on('error', (error) => {
-                    console.error(`[ERROR] ${provider} watcher error:`, error);
-                })
-                .on('ready', () => {
-                });
-
-            projectsWatchers.push(watcher);
-        } catch (error) {
-            console.error(`[ERROR] Failed to setup ${provider} watcher for ${rootPath}:`, error);
-        }
-    }
-
-    if (projectsWatchers.length === 0) {
-        console.error('[ERROR] Failed to setup any provider watchers');
-    }
-}
 
 
 const app = express();
@@ -495,6 +279,19 @@ app.use('/api/usage-stats', authenticateToken, usageStatsRoutes);
 // Admin API routes (protected + admin check inside)
 app.use('/api/admin', authenticateToken, adminRoutes);
 
+// Admin: full sessions_meta backfill/rebuild
+app.post('/api/admin/backfill-sessions', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const owned = sessionOwnershipDb.getAllOwnedSessionIds('claude');
+        const stats = await backfillSessionsMeta({ sessionsMetaDb, ownedSessionIds: owned });
+        clearProjectDirectoryCache(); // sessions_meta changed — cached project paths may be stale
+        res.json({ success: true, stats });
+    } catch (error) {
+        console.error('[BACKFILL] failed:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Unified session messages route (protected)
 app.use('/api/sessions', authenticateToken, messagesRoutes);
 
@@ -593,34 +390,34 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
 
 app.get('/api/projects', authenticateToken, async (req, res) => {
     try {
-        const projects = await getProjects(broadcastProgress);
-
-        // Multi-user: show only own sessions, hide projects with only other users' sessions
-        const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
-        res.json(await filterProjectsByOwnerAsync(projects, ownedIds));
+        const projects = await listProjectsLight({
+            sessionsMetaDb, userId: req.user.id,
+        });
+        res.json(projects);
     } catch (error) {
+        console.error('Error fetching projects:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 app.get('/api/projects/:projectName/sessions', authenticateToken, async (req, res) => {
     try {
-        const { limit = 5, offset = 0 } = req.query;
-        const parsedLimit = parseInt(limit);
-        const parsedOffset = parseInt(offset);
-
-        // Load all sessions (uncapped — this is user-initiated, per-project), filter to current user's, then paginate
-        const allResult = await getSessions(req.params.projectName, 999999, 0);
-        const ownedIds = sessionOwnershipDb.getUserSessionIds(req.user.id, 'claude');
-        const filtered = allResult.sessions.filter(s => ownedIds.has(s.id));
-
-        const total = filtered.length;
-        const paginatedSessions = filtered.slice(parsedOffset, parsedOffset + parsedLimit);
-
-        applyCustomSessionNames(paginatedSessions, 'claude');
-        res.json({ sessions: paginatedSessions, hasMore: parsedOffset + parsedLimit < total, total, offset: parsedOffset, limit: parsedLimit });
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+        const cursor = (req.query.cursorLast && req.query.cursorId)
+            ? { lastActivity: req.query.cursorLast, sessionId: req.query.cursorId }
+            : null;
+        const page = sessionsMetaDb.listPage({
+            userId: req.user.id, project: req.params.projectName, limit, cursor,
+        });
+        const sessions = page.sessions.map(r => ({
+            id: r.session_id, summary: r.title || 'New Session',
+            messageCount: r.message_count, lastActivity: r.last_activity, cwd: r.cwd || '',
+        }));
+        applyCustomSessionNames(sessions, 'claude');
+        res.json({ sessions, hasMore: page.hasMore, nextCursor: page.nextCursor });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('Error fetching sessions:', error);
+        res.status(500).json({ error: 'Failed to fetch sessions' });
     }
 });
 
@@ -640,8 +437,17 @@ app.delete('/api/projects/:projectName/sessions/:sessionId', authenticateToken, 
     try {
         const { projectName, sessionId } = req.params;
         console.log(`[API] Deleting session: ${sessionId} from project: ${projectName}`);
-        await deleteSession(projectName, sessionId);
-        sessionNamesDb.deleteName(sessionId, 'claude');
+        try {
+            await deleteSession(projectName, sessionId);
+        } catch (error) {
+            // Transcript already gone (CLI 30-day retention) — nothing to clean on
+            // disk, but the session must still disappear from the UI.
+            if (error.code !== 'SESSION_NOT_FOUND') throw error;
+            console.log(`[API] Session ${sessionId} has no transcript on disk — soft-deleting DB row only`);
+        }
+        // Soft delete: the row stays in the DB for statistics (decision 2026-07-03)
+        sessionsMetaDb.softDelete(sessionId, 'claude');
+        broadcastToUser(req.user.id, { type: 'session_deleted', project: projectName, sessionId });
         console.log(`[API] Session ${sessionId} deleted successfully`);
         res.json({ success: true });
     } catch (error) {
@@ -669,6 +475,8 @@ app.put('/api/sessions/:sessionId/rename', authenticateToken, async (req, res) =
             return res.status(400).json({ error: `Provider must be one of: ${VALID_PROVIDERS.join(', ')}` });
         }
         sessionNamesDb.setName(safeSessionId, provider, summary.trim());
+        const metaRow = sessionsMetaDb.getById(safeSessionId);
+        broadcastToUser(req.user.id, { type: 'session_renamed', project: metaRow?.project || null, sessionId: safeSessionId, title: summary.trim() });
         res.json({ success: true });
     } catch (error) {
         console.error(`[API] Error renaming session ${req.params.sessionId}:`, error);
@@ -682,6 +490,8 @@ app.delete('/api/projects/:projectName', authenticateToken, async (req, res) => 
         const { projectName } = req.params;
         const force = req.query.force === 'true';
         await deleteProject(projectName, force);
+        // Soft delete: rows stay in the DB for statistics (decision 2026-07-03)
+        sessionsMetaDb.softDeleteProject(projectName);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1598,10 +1408,9 @@ class WebSocketWriter {
 function handleChatConnection(ws, request) {
     console.log('[INFO] Chat WebSocket connected');
 
-    // Add to connected clients for project updates
     const userId = request?.user?.id ?? request?.user?.userId ?? null;
     ws._userId = userId;
-    connectedClients.add(ws);
+    registerClient(ws, userId);
 
     // Wrap WebSocket with writer for consistent interface with SSEStreamWriter
     const writer = new WebSocketWriter(ws, userId);
@@ -1761,8 +1570,7 @@ function handleChatConnection(ws, request) {
 
     ws.on('close', () => {
         console.log('🔌 Chat client disconnected');
-        // Remove from connected clients
-        connectedClients.delete(ws);
+        unregisterClient(ws);
     });
 }
 
@@ -2703,8 +2511,15 @@ async function startServer() {
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');
 
-            // Start watching the projects folder for changes
-            await setupProjectsWatcher();
+            // Repair sessions_meta <-> disk drift on startup (non-blocking)
+            setImmediate(async () => {
+                try {
+                    const owned = sessionOwnershipDb.getAllOwnedSessionIds('claude');
+                    const stats = await repairSessionsMeta({ sessionsMetaDb, ownedSessionIds: owned });
+                    console.log(`[REPAIR] sessions_meta: +${stats.inserted}`);
+                    clearProjectDirectoryCache(); // sessions_meta changed — cached project paths may be stale
+                } catch (e) { console.error('[REPAIR] failed:', e.message); }
+            });
 
             // Start server-side plugin processes for enabled plugins
             startEnabledPluginServers().catch(err => {

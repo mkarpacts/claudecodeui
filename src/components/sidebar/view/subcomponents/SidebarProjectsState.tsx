@@ -1,10 +1,8 @@
 import { Folder, Search } from 'lucide-react';
 import type { TFunction } from 'i18next';
-import type { LoadingProgress } from '../../../../types/app';
 
 type SidebarProjectsStateProps = {
   isLoading: boolean;
-  loadingProgress: LoadingProgress | null;
   projectsCount: number;
   filteredProjectsCount: number;
   t: TFunction;
@@ -12,7 +10,6 @@ type SidebarProjectsStateProps = {
 
 export default function SidebarProjectsState({
   isLoading,
-  loadingProgress,
   projectsCount,
   filteredProjectsCount,
   t,
@@ -24,29 +21,7 @@ export default function SidebarProjectsState({
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
         </div>
         <h3 className="mb-2 text-base font-medium text-foreground md:mb-1">{t('projects.loadingProjects')}</h3>
-        {loadingProgress && loadingProgress.total > 0 ? (
-          <div className="space-y-2">
-            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full bg-primary transition-all duration-300 ease-out"
-                style={{ width: `${(loadingProgress.current / loadingProgress.total) * 100}%` }}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {loadingProgress.current}/{loadingProgress.total} {t('projects.projects')}
-            </p>
-            {loadingProgress.currentProject && (
-              <p
-                className="mx-auto max-w-[200px] truncate text-xs text-muted-foreground/70"
-                title={loadingProgress.currentProject}
-              >
-                {loadingProgress.currentProject.split('-').slice(-2).join('/')}
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('projects.fetchingProjects')}</p>
-        )}
+        <p className="text-sm text-muted-foreground">{t('projects.fetchingProjects')}</p>
       </div>
     );
   }

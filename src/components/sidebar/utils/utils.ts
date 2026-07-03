@@ -1,7 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { Project } from '../../../types/app';
 import type {
-  AdditionalSessionsByProject,
   ProjectSortOrder,
   SettingsProject,
   SessionViewModel,
@@ -100,12 +99,13 @@ export const createSessionViewModel = (
 
 export const getAllSessions = (
   project: Project,
-  additionalSessions: AdditionalSessionsByProject,
+  sessionsByProject: Record<string, SessionWithProvider[]>,
 ): SessionWithProvider[] => {
-  const claudeSessions = [
-    ...(project.sessions || []),
-    ...(additionalSessions[project.name] || []),
-  ].map((session) => ({ ...session, __provider: 'claude' as const }));
+  // Use lazily-loaded sessions when available; server now returns sessions: [] always
+  const loadedClaudeSessions = sessionsByProject[project.name];
+  const claudeSessions = loadedClaudeSessions !== undefined
+    ? loadedClaudeSessions
+    : (project.sessions || []).map((session) => ({ ...session, __provider: 'claude' as const }));
 
   const cursorSessions = (project.cursorSessions || []).map((session) => ({
     ...session,
@@ -129,11 +129,12 @@ export const getAllSessions = (
 
 export const getProjectLastActivity = (
   project: Project,
-  additionalSessions: AdditionalSessionsByProject,
+  sessionsByProject: Record<string, SessionWithProvider[]>,
 ): Date => {
-  const sessions = getAllSessions(project, additionalSessions);
+  const sessions = getAllSessions(project, sessionsByProject);
   if (sessions.length === 0) {
-    return new Date(0);
+    // No loaded sessions — fall back to server-provided project-level activity
+    return project.sessionMeta?.lastActivity ? new Date(project.sessionMeta.lastActivity) : new Date(0);
   }
 
   return sessions.reduce((latest, session) => {
@@ -146,7 +147,7 @@ export const sortProjects = (
   projects: Project[],
   projectSortOrder: ProjectSortOrder,
   starredProjects: Set<string>,
-  additionalSessions: AdditionalSessionsByProject,
+  sessionsByProject: Record<string, SessionWithProvider[]>,
 ): Project[] => {
   const byName = [...projects];
 
@@ -164,8 +165,8 @@ export const sortProjects = (
 
     if (projectSortOrder === 'date') {
       return (
-        getProjectLastActivity(projectB, additionalSessions).getTime() -
-        getProjectLastActivity(projectA, additionalSessions).getTime()
+        getProjectLastActivity(projectB, sessionsByProject).getTime() -
+        getProjectLastActivity(projectA, sessionsByProject).getTime()
       );
     }
 

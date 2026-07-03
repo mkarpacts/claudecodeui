@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { TFunction } from 'i18next';
 import { api } from '../../../utils/api';
-import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
+import type { Project, ProjectSession, SessionProvider, SessionDeletedMessage, SessionRenamedMessage, SessionUpdatedMessage } from '../../../types/app';
+import { subscribeSessionsChanged } from '../../../utils/sessionEvents';
 import type {
-  AdditionalSessionsByProject,
   DeleteProjectConfirmation,
   LoadingSessionsByProject,
   ProjectSortOrder,
@@ -62,7 +62,6 @@ type UseSidebarControllerArgs = {
   projects: Project[];
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
-  isLoading: boolean;
   isMobile: boolean;
   t: TFunction;
   onRefresh: () => Promise<void> | void;
@@ -79,7 +78,6 @@ export function useSidebarController({
   projects,
   selectedProject,
   selectedSession,
-  isLoading,
   isMobile,
   t,
   onRefresh,
@@ -96,12 +94,11 @@ export function useSidebarController({
   const [showNewProject, setShowNewProject] = useState(false);
   const [editingName, setEditingName] = useState('');
   const [loadingSessions, setLoadingSessions] = useState<LoadingSessionsByProject>({});
-  const [additionalSessions, setAdditionalSessions] = useState<AdditionalSessionsByProject>({});
-  const [initialSessionsLoaded, setInitialSessionsLoaded] = useState<Set<string>>(new Set());
+  const [sessionsByProject, setSessionsByProject] = useState<Record<string, SessionWithProvider[]>>({});
+  const [cursorByProject, setCursorByProject] = useState<Record<string, { lastActivity: string; sessionId: string } | null>>({});
   const [currentTime, setCurrentTime] = useState(new Date());
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [projectHasMoreOverrides, setProjectHasMoreOverrides] = useState<Record<string, boolean>>({});
   const [editingSession, setEditingSession] = useState<string | null>(null);
   const [editingSessionName, setEditingSessionName] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
@@ -128,7 +125,7 @@ export function useSidebarController({
     return () => clearInterval(timer);
   }, []);
 
-  // Reset pagination state only when the set of projects changes (added/removed),
+  // Prune session state only when the set of projects changes (added/removed),
   // not on every WebSocket session-data update which would wipe "Show more" results
   const projectListKey = useMemo(
     () => projects.map((p) => p.name).sort().join('\0'),
@@ -136,9 +133,20 @@ export function useSidebarController({
   );
 
   useEffect(() => {
-    setAdditionalSessions({});
-    setInitialSessionsLoaded(new Set());
-    setProjectHasMoreOverrides({});
+    // Prune ONLY the keys of projects that no longer exist — keep loaded state
+    // for surviving projects so expanded lists don't reset to a stuck skeleton.
+    const alive = new Set(projectListKey.split('\0'));
+
+    const pruneRecord = <T,>(prev: Record<string, T>): Record<string, T> => {
+      const staleKeys = Object.keys(prev).filter((name) => !alive.has(name));
+      if (staleKeys.length === 0) return prev;
+      const next = { ...prev };
+      for (const key of staleKeys) delete next[key];
+      return next;
+    };
+
+    setSessionsByProject(pruneRecord);
+    setCursorByProject(pruneRecord);
   }, [projectListKey]);
 
   useEffect(() => {
@@ -151,20 +159,10 @@ export function useSidebarController({
         next.add(selectedProject.name);
         return next;
       });
+      // Trigger lazy load — guard is inside loadSessions
+      void loadSessions(selectedProject, null);
     }
-  }, [selectedSession, selectedProject]);
-
-  useEffect(() => {
-    if (projects.length > 0 && !isLoading) {
-      const loadedProjects = new Set<string>();
-      projects.forEach((project) => {
-        if (project.sessions && project.sessions.length >= 0) {
-          loadedProjects.add(project.name);
-        }
-      });
-      setInitialSessionsLoaded(loadedProjects);
-    }
-  }, [projects, isLoading]);
+  }, [selectedSession, selectedProject]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const loadSortOrder = () => {
@@ -191,6 +189,47 @@ export function useSidebarController({
       window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
+  }, []);
+
+  // Subscribe to owner-scoped WS session events forwarded as CustomEvents
+  useEffect(() => {
+    return subscribeSessionsChanged((msg) => {
+      setSessionsByProject((prev) => {
+        const list = prev[msg.project];
+        if (!list) return prev; // Project not expanded/loaded — count refreshes on next /api/projects fetch
+
+        if (msg.type === 'session_deleted') {
+          return { ...prev, [msg.project]: list.filter((s) => s.id !== (msg as SessionDeletedMessage).sessionId) };
+        }
+
+        if (msg.type === 'session_renamed') {
+          const renamed = msg as SessionRenamedMessage;
+          return {
+            ...prev,
+            [msg.project]: list.map((s) =>
+              s.id === renamed.sessionId ? { ...s, summary: renamed.title } : s,
+            ),
+          };
+        }
+
+        if (msg.type === 'session_updated') {
+          const updated = msg as SessionUpdatedMessage;
+          const rest = list.filter((s) => s.id !== updated.session.id);
+          const existing = list.find((s) => s.id === updated.session.id);
+          const updatedSession: SessionWithProvider = {
+            id: updated.session.id,
+            // Prefer existing custom summary when the WS event title is null
+            summary: updated.session.title ?? (existing?.summary || 'New Session'),
+            lastActivity: updated.session.last_activity,
+            messageCount: updated.session.message_count,
+            __provider: 'claude' as const,
+          };
+          return { ...prev, [msg.project]: [updatedSession, ...rest] };
+        }
+
+        return prev;
+      });
+    });
   }, []);
 
   // Debounced conversation search with SSE streaming
@@ -303,15 +342,74 @@ export function useSidebarController({
     [],
   );
 
-  const toggleProject = useCallback((projectName: string) => {
-    setExpandedProjects((prev) => {
-      const next = new Set<string>();
-      if (!prev.has(projectName)) {
-        next.add(projectName);
+  const loadSessions = useCallback(
+    async (project: Project, cursor: { lastActivity: string; sessionId: string } | null) => {
+      // Already loaded (initial) or in progress — skip
+      if (loadingSessions[project.name]) return;
+      if (cursor === null && project.name in sessionsByProject) return;
+
+      setLoadingSessions((prev) => ({ ...prev, [project.name]: true }));
+
+      try {
+        const response = await api.sessions(project.name, 20, cursor);
+
+        if (!response.ok) {
+          return;
+        }
+
+        const result = (await response.json()) as {
+          sessions?: ProjectSession[];
+          hasMore?: boolean;
+          nextCursor?: { lastActivity: string; sessionId: string } | null;
+        };
+
+        const newSessions: SessionWithProvider[] = (result.sessions || []).map((s) => ({
+          ...s,
+          __provider: 'claude' as const,
+        }));
+
+        if (cursor === null) {
+          // Initial load — replace
+          setSessionsByProject((prev) => ({ ...prev, [project.name]: newSessions }));
+        } else {
+          // Append page
+          setSessionsByProject((prev) => ({
+            ...prev,
+            [project.name]: [...(prev[project.name] || []), ...newSessions],
+          }));
+        }
+
+        setCursorByProject((prev) => ({
+          ...prev,
+          [project.name]: result.nextCursor ?? null,
+        }));
+      } catch (error) {
+        console.error('Error loading sessions:', error);
+        // Seed empty list so UI shows "no sessions" instead of eternal skeleton
+        setSessionsByProject((prev) => ({ ...prev, [project.name]: prev[project.name] ?? [] }));
+      } finally {
+        setLoadingSessions((prev) => ({ ...prev, [project.name]: false }));
       }
-      return next;
-    });
-  }, []);
+    },
+    [loadingSessions, sessionsByProject],
+  );
+
+  const toggleProject = useCallback(
+    (projectName: string) => {
+      setExpandedProjects((prev) => {
+        const next = new Set<string>();
+        if (!prev.has(projectName)) {
+          next.add(projectName);
+        }
+        return next;
+      });
+
+      // Lazy-load sessions — guard is inside loadSessions
+      const project = projects.find((p) => p.name === projectName);
+      if (project) void loadSessions(project, null);
+    },
+    [loadSessions, projects],
+  );
 
   const handleSessionClick = useCallback(
     (session: SessionWithProvider, projectName: string) => {
@@ -340,29 +438,22 @@ export function useSidebarController({
   );
 
   const getProjectSessions = useCallback(
-    (project: Project) => getAllSessions(project, additionalSessions),
-    [additionalSessions],
+    (project: Project) => getAllSessions(project, sessionsByProject),
+    [sessionsByProject],
   );
 
-  const projectsWithSessionMeta = useMemo(
-    () =>
-      projects.map((project) => {
-        const hasMoreOverride = projectHasMoreOverrides[project.name];
-        if (hasMoreOverride === undefined) {
-          return project;
-        }
-
-        return {
-          ...project,
-          sessionMeta: { ...project.sessionMeta, hasMore: hasMoreOverride },
-        };
-      }),
-    [projectHasMoreOverrides, projects],
+  const getProjectHasMore = useCallback(
+    (project: Project): boolean => {
+      const cursor = cursorByProject[project.name];
+      // cursor is undefined = not yet loaded, null = no more pages, object = has more
+      return cursor !== undefined && cursor !== null;
+    },
+    [cursorByProject],
   );
 
   const sortedProjects = useMemo(
-    () => sortProjects(projectsWithSessionMeta, projectSortOrder, starredProjects, additionalSessions),
-    [additionalSessions, projectSortOrder, projectsWithSessionMeta, starredProjects],
+    () => sortProjects(projects, projectSortOrder, starredProjects, sessionsByProject),
+    [sessionsByProject, projectSortOrder, projects, starredProjects],
   );
 
   const filteredProjects = useMemo(
@@ -451,9 +542,14 @@ export function useSidebarController({
 
   const requestProjectDelete = useCallback(
     (project: Project) => {
+      // Use server-provided exact count; fall back to loaded sessions length
+      const sessionCount =
+        project.sessionMeta?.total !== undefined
+          ? project.sessionMeta.total
+          : getProjectSessions(project).length;
       setDeleteConfirmation({
         project,
-        sessionCount: getProjectSessions(project).length,
+        sessionCount,
       });
     },
     [getProjectSessions],
@@ -493,45 +589,10 @@ export function useSidebarController({
 
   const loadMoreSessions = useCallback(
     async (project: Project) => {
-      const hasMoreOverride = projectHasMoreOverrides[project.name];
-      const canLoadMore =
-        hasMoreOverride !== undefined ? hasMoreOverride : project.sessionMeta?.hasMore === true;
-      if (!canLoadMore || loadingSessions[project.name]) {
-        return;
-      }
-
-      setLoadingSessions((prev) => ({ ...prev, [project.name]: true }));
-
-      try {
-        const currentSessionCount =
-          (project.sessions?.length || 0) + (additionalSessions[project.name]?.length || 0);
-        const response = await api.sessions(project.name, 5, currentSessionCount);
-
-        if (!response.ok) {
-          return;
-        }
-
-        const result = (await response.json()) as {
-          sessions?: ProjectSession[];
-          hasMore?: boolean;
-        };
-
-        setAdditionalSessions((prev) => ({
-          ...prev,
-          [project.name]: [...(prev[project.name] || []), ...(result.sessions || [])],
-        }));
-
-        if (result.hasMore === false) {
-          // Keep hasMore state in local hook state instead of mutating the project prop object.
-          setProjectHasMoreOverrides((prev) => ({ ...prev, [project.name]: false }));
-        }
-      } catch (error) {
-        console.error('Error loading more sessions:', error);
-      } finally {
-        setLoadingSessions((prev) => ({ ...prev, [project.name]: false }));
-      }
+      const cursor = cursorByProject[project.name];
+      if (cursor) void loadSessions(project, cursor);
     },
-    [additionalSessions, loadingSessions, projectHasMoreOverrides],
+    [cursorByProject, loadSessions],
   );
 
   const handleProjectSelect = useCallback(
@@ -593,8 +654,8 @@ export function useSidebarController({
     showNewProject,
     editingName,
     loadingSessions,
-    additionalSessions,
-    initialSessionsLoaded,
+    sessionsByProject,
+    cursorByProject,
     currentTime,
     projectSortOrder,
     isRefreshing,
@@ -612,6 +673,7 @@ export function useSidebarController({
     toggleStarProject,
     isProjectStarred,
     getProjectSessions,
+    getProjectHasMore,
     startEditing,
     cancelEditing,
     saveProjectName,

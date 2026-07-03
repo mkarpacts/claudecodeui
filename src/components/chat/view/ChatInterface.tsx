@@ -40,7 +40,6 @@ function ChatInterface({
   showThinking,
   autoScrollToBottom,
   sendByCtrlEnter,
-  externalMessageUpdate,
   onShowAllTasks,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
@@ -120,7 +119,6 @@ function ChatInterface({
     ws,
     sendMessage,
     autoScrollToBottom,
-    externalMessageUpdate,
     processingSessions,
     resetStreamingState,
     pendingViewSessionRef,

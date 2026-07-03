@@ -11,6 +11,7 @@
 
 import express from 'express';
 import { getProvider, getAllProviders } from '../providers/registry.js';
+import { isAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -49,6 +50,8 @@ router.get('/:sessionId/messages', async (req, res) => {
       projectPath,
       limit,
       offset,
+      userId: req.user?.id ?? null,
+      isAdmin: isAdmin(req.user),
     });
 
     return res.json(result);

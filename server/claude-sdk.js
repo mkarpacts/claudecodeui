@@ -26,7 +26,10 @@ import {
 } from './services/notification-orchestrator.js';
 import { claudeAdapter } from './providers/claude/adapter.js';
 import { createNormalizedMessage } from './providers/types.js';
-import { usageDb, sessionOwnershipDb } from './database/db.js';
+import { usageDb, sessionOwnershipDb, sessionsMetaDb, sessionNamesDb } from './database/db.js';
+import { truncateTitle } from './services/sessionsLiveness.js';
+import { encodeProjectName, sessionFilePath } from './database/sessionsMeta.js';
+import { broadcastToUser } from './lib/wsHub.js';
 import { pluginConfigsFromEnv } from './lib/pluginConfig.js';
 import { skillsCache } from './lib/skillsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
@@ -794,6 +797,14 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
     }
 
+    // Helper: register a session row (insert-or-ignore) with the given title.
+    const registerSessionMeta = (sid, title = null) => {
+      const cwd = options.cwd || process.cwd();
+      sessionsMetaDb.upsertCreated({
+        sessionId: sid, project: encodeProjectName(cwd), filePath: sessionFilePath(cwd, sid), cwd, title,
+      });
+    };
+
     // Process the first message that we already received
     const processMessage = (message) => {
       if (message.session_id && !capturedSessionId) {
@@ -809,6 +820,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
           }
         }
 
+        try {
+          registerSessionMeta(capturedSessionId, truncateTitle(command));
+        } catch (e) {
+          console.warn('[SESSION] Failed to write sessions_meta:', e.message);
+        }
+
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
           ws.setSessionId(capturedSessionId);
         }
@@ -816,6 +833,21 @@ async function queryClaudeSDK(command, options = {}, ws) {
         if (!sessionId && !sessionCreatedSent) {
           sessionCreatedSent = true;
           ws.send(createNormalizedMessage({ kind: 'session_created', newSessionId: capturedSessionId, sessionId: capturedSessionId, provider: 'claude' }));
+        }
+      }
+
+      // Defensive: if the SDK ever returns a different session_id mid-stream (fork/compaction),
+      // register the new session and mark the old one superseded. Verified 2026-07-02: resume
+      // keeps the same id, so this path should never fire in practice.
+      if (message.session_id && capturedSessionId && message.session_id !== capturedSessionId) {
+        try {
+          registerSessionMeta(message.session_id, null);
+          if (ws.userId) sessionOwnershipDb.claim(message.session_id, 'claude', ws.userId);
+          sessionsMetaDb.supersede(capturedSessionId, message.session_id);
+          console.warn(`[SESSION] session_id changed ${capturedSessionId} -> ${message.session_id}; superseded`);
+          capturedSessionId = message.session_id;
+        } catch (e) {
+          console.warn('[SESSION] Failed to handle session_id change:', e.message);
         }
       }
 
@@ -851,6 +883,29 @@ async function queryClaudeSDK(command, options = {}, ws) {
               console.error('Usage logging error:', e.message);
             }
           }
+        }
+
+        try {
+          if (sid) {
+            // best-effort v1: one user prompt + one completed assistant response per query
+            let row = sessionsMetaDb.recordActivity(sid, 'claude', 2);
+            if (!row) {
+              // resumed session predating write-through (not yet backfilled) — self-heal
+              registerSessionMeta(sid, null);
+              console.warn('[SESSION] sessions_meta row missing for', sid, '— self-healed');
+              row = sessionsMetaDb.recordActivity(sid, 'claude', 2);
+            }
+            if (ws.userId && row) {
+              const title = sessionNamesDb.getName(sid, 'claude') ?? row.title;
+              broadcastToUser(ws.userId, {
+                type: 'session_updated',
+                project: row.project,
+                session: { id: row.session_id, title, last_activity: row.last_activity, message_count: row.message_count },
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[SESSION] Failed to update sessions_meta on result:', e.message);
         }
 
         const tokenBudgetData = extractTokenBudget(message);

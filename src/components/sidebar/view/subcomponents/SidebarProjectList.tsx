@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { TFunction } from 'i18next';
-import type { LoadingProgress, Project, ProjectSession, SessionProvider } from '../../../../types/app';
+import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import type {
   LoadingSessionsByProject,
   MCPServerStatus,
@@ -15,12 +15,11 @@ export type SidebarProjectListProps = {
   selectedProject: Project | null;
   selectedSession: ProjectSession | null;
   isLoading: boolean;
-  loadingProgress: LoadingProgress | null;
   expandedProjects: Set<string>;
   editingProject: string | null;
   editingName: string;
   loadingSessions: LoadingSessionsByProject;
-  initialSessionsLoaded: Set<string>;
+  sessionsByProject: Record<string, SessionWithProvider[]>;
   currentTime: Date;
   editingSession: string | null;
   editingSessionName: string;
@@ -28,6 +27,7 @@ export type SidebarProjectListProps = {
   tasksEnabled: boolean;
   mcpServerStatus: MCPServerStatus;
   getProjectSessions: (project: Project) => SessionWithProvider[];
+  getProjectHasMore: (project: Project) => boolean;
   isProjectStarred: (projectName: string) => boolean;
   onEditingNameChange: (value: string) => void;
   onToggleProject: (projectName: string) => void;
@@ -59,12 +59,11 @@ export default function SidebarProjectList({
   selectedProject,
   selectedSession,
   isLoading,
-  loadingProgress,
   expandedProjects,
   editingProject,
   editingName,
   loadingSessions,
-  initialSessionsLoaded,
+  sessionsByProject,
   currentTime,
   editingSession,
   editingSessionName,
@@ -72,6 +71,7 @@ export default function SidebarProjectList({
   tasksEnabled,
   mcpServerStatus,
   getProjectSessions,
+  getProjectHasMore,
   isProjectStarred,
   onEditingNameChange,
   onToggleProject,
@@ -94,7 +94,6 @@ export default function SidebarProjectList({
   const state = (
     <SidebarProjectsState
       isLoading={isLoading}
-      loadingProgress={loadingProgress}
       projectsCount={projects.length}
       filteredProjectsCount={filteredProjects.length}
       t={t}
@@ -128,7 +127,8 @@ export default function SidebarProjectList({
               editingProject={editingProject}
               editingName={editingName}
               sessions={getProjectSessions(project)}
-              initialSessionsLoaded={initialSessionsLoaded.has(project.name)}
+              hasMoreSessions={getProjectHasMore(project)}
+              initialSessionsLoaded={project.name in sessionsByProject}
               isLoadingSessions={Boolean(loadingSessions[project.name])}
               currentTime={currentTime}
               editingSession={editingSession}

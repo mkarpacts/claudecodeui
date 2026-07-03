@@ -19,6 +19,7 @@ type SidebarProjectItemProps = {
   editingProject: string | null;
   editingName: string;
   sessions: SessionWithProvider[];
+  hasMoreSessions: boolean;
   initialSessionsLoaded: boolean;
   isLoadingSessions: boolean;
   currentTime: Date;
@@ -50,15 +51,6 @@ type SidebarProjectItemProps = {
   t: TFunction;
 };
 
-const getSessionCountDisplay = (sessions: SessionWithProvider[], hasMoreSessions: boolean): string => {
-  const sessionCount = sessions.length;
-  if (hasMoreSessions && sessionCount >= 5) {
-    return `${sessionCount}+`;
-  }
-
-  return `${sessionCount}`;
-};
-
 export default function SidebarProjectItem({
   project,
   selectedProject,
@@ -69,6 +61,7 @@ export default function SidebarProjectItem({
   editingProject,
   editingName,
   sessions,
+  hasMoreSessions,
   initialSessionsLoaded,
   isLoadingSessions,
   currentTime,
@@ -98,9 +91,8 @@ export default function SidebarProjectItem({
   const canDeleteProject = Boolean(user?.isAdmin);
   const isSelected = selectedProject?.name === project.name;
   const isEditing = editingProject === project.name;
-  const hasMoreSessions = project.sessionMeta?.hasMore === true;
-  const sessionCountDisplay = getSessionCountDisplay(sessions, hasMoreSessions);
-  const sessionCountLabel = `${sessionCountDisplay} session${sessions.length === 1 ? '' : 's'}`;
+  const total = project.sessionMeta?.total ?? sessions.length;
+  const sessionCountLabel = `${total} session${total === 1 ? '' : 's'}`;
   const taskStatus = getTaskIndicatorStatus(project, mcpServerStatus);
 
   const toggleProject = () => onToggleProject(project.name);
@@ -320,7 +312,7 @@ export default function SidebarProjectItem({
                     {project.displayName}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {sessionCountDisplay}
+                    {total}
                     {project.fullPath !== project.displayName && (
                       <span className="ml-1 opacity-60" title={project.fullPath}>
                         {' - '}
@@ -414,6 +406,7 @@ export default function SidebarProjectItem({
         project={project}
         isExpanded={isExpanded}
         sessions={sessions}
+        hasMoreSessions={hasMoreSessions}
         selectedSession={selectedSession}
         initialSessionsLoaded={initialSessionsLoaded}
         isLoadingSessions={isLoadingSessions}

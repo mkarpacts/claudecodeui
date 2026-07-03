@@ -21,7 +21,6 @@ interface UseChatSessionStateArgs {
   ws: WebSocket | null;
   sendMessage: (message: unknown) => void;
   autoScrollToBottom?: boolean;
-  externalMessageUpdate?: number;
   processingSessions?: Set<string>;
   resetStreamingState: () => void;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
@@ -94,7 +93,6 @@ export function useChatSessionState({
   ws,
   sendMessage,
   autoScrollToBottom,
-  externalMessageUpdate,
   processingSessions,
   resetStreamingState,
   pendingViewSessionRef,
@@ -397,43 +395,6 @@ export function useChatSessionState({
     sendMessage,
     ws,
     sessionStore,
-  ]);
-
-  // External message update (e.g. WebSocket reconnect, background refresh)
-  useEffect(() => {
-    if (!externalMessageUpdate || !selectedSession || !selectedProject) return;
-
-    const reloadExternalMessages = async () => {
-      try {
-        const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
-
-        // Skip store refresh during active streaming
-        if (!isLoading) {
-          await sessionStore.refreshFromServer(selectedSession.id, {
-            provider: (selectedSession.__provider || provider) as SessionProvider,
-            projectName: selectedProject.name,
-            projectPath: selectedProject.fullPath || selectedProject.path || '',
-          });
-
-          if (Boolean(autoScrollToBottom) && isNearBottom()) {
-            setTimeout(() => scrollToBottom(), 200);
-          }
-        }
-      } catch (error) {
-        console.error('Error reloading messages from external update:', error);
-      }
-    };
-
-    reloadExternalMessages();
-  }, [
-    autoScrollToBottom,
-    externalMessageUpdate,
-    isNearBottom,
-    scrollToBottom,
-    selectedProject,
-    selectedSession,
-    sessionStore,
-    isLoading,
   ]);
 
   // Search navigation target

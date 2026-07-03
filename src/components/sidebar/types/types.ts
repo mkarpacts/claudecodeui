@@ -1,4 +1,4 @@
-import type { LoadingProgress, Project, ProjectSession, SessionProvider } from '../../../types/app';
+import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 
 export type ProjectSortOrder = 'name' | 'date';
 
@@ -6,7 +6,6 @@ export type SessionWithProvider = ProjectSession & {
   __provider: SessionProvider;
 };
 
-export type AdditionalSessionsByProject = Record<string, ProjectSession[]>;
 export type LoadingSessionsByProject = Record<string, boolean>;
 
 export type DeleteProjectConfirmation = {
@@ -31,7 +30,6 @@ export type SidebarProps = {
   onSessionDelete?: (sessionId: string) => void;
   onProjectDelete?: (projectName: string) => void;
   isLoading: boolean;
-  loadingProgress: LoadingProgress | null;
   onRefresh: () => Promise<void> | void;
   onShowSettings: () => void;
   showSettings: boolean;

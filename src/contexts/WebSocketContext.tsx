@@ -2,6 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAuth } from '../components/auth/context/AuthContext';
 import { readStoredToken } from '../components/auth/constants';
 import { IS_PLATFORM } from '../constants/config';
+import { dispatchSessionsChanged } from '../utils/sessionEvents';
+
+const SESSION_EVENT_TYPES = new Set(['session_updated', 'session_renamed', 'session_deleted']);
 
 const RECONNECT_DELAY_MS = 3_000;
 const MAX_PENDING_MESSAGES = 10;
@@ -81,6 +84,14 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           if (cancelled) return;
           try {
             const data = JSON.parse(event.data);
+            // Session-list events must be delivered losslessly. latestMessage is a
+            // single state value: during streaming the server sends session_updated
+            // immediately followed by status/complete, and React coalesces the state
+            // updates — an effect watching latestMessage can never see the
+            // intermediate value. Dispatch synchronously, outside React state.
+            if (data?.type && SESSION_EVENT_TYPES.has(data.type)) {
+              dispatchSessionsChanged(data);
+            }
             setLatestMessage(data);
           } catch (error) {
             console.error('Error parsing WebSocket message:', error);

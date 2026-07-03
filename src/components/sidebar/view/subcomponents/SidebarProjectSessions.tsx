@@ -9,6 +9,7 @@ type SidebarProjectSessionsProps = {
   project: Project;
   isExpanded: boolean;
   sessions: SessionWithProvider[];
+  hasMoreSessions: boolean;
   selectedSession: ProjectSession | null;
   initialSessionsLoaded: boolean;
   isLoadingSessions: boolean;
@@ -54,6 +55,7 @@ export default function SidebarProjectSessions({
   project,
   isExpanded,
   sessions,
+  hasMoreSessions,
   selectedSession,
   initialSessionsLoaded,
   isLoadingSessions,
@@ -76,7 +78,6 @@ export default function SidebarProjectSessions({
   }
 
   const hasSessions = sessions.length > 0;
-  const hasMoreSessions = project.sessionMeta?.hasMore === true;
 
   return (
     <div className="ml-3 space-y-1 border-l border-border pl-3">

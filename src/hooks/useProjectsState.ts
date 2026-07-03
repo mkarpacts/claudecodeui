@@ -2,20 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import { api } from '../utils/api';
 import type {
-  AppSocketMessage,
   AppTab,
-  LoadingProgress,
   Project,
   ProjectSession,
-  ProjectsUpdatedMessage,
 } from '../types/app';
+import { subscribeSessionsChanged } from '../utils/sessionEvents';
 
 type UseProjectsStateArgs = {
   sessionId?: string;
   navigate: NavigateFunction;
-  latestMessage: AppSocketMessage | null;
   isMobile: boolean;
-  activeSessions: Set<string>;
 };
 
 type FetchProjectsOptions = {
@@ -72,87 +68,6 @@ const getProjectSessions = (project: Project): ProjectSession[] => {
   ];
 };
 
-/**
- * Merge WebSocket project updates with current state to prevent session loss.
- * The server's sync ownership filter may return fewer sessions than the initial
- * HTTP load (which uses a full re-fetch). This function preserves sessions that
- * were correctly loaded initially but absent from the WebSocket update.
- */
-const mergeProjectSessions = (
-  currentProjects: Project[],
-  updatedProjects: Project[],
-  recentlyDeleted: Set<string>,
-): Project[] => {
-  const currentByName = new Map(currentProjects.map((p) => [p.name, p]));
-
-  return updatedProjects.map((updated) => {
-    const current = currentByName.get(updated.name);
-    if (!current?.sessions?.length) return updated;
-
-    const updatedSessions = updated.sessions ?? [];
-    const updatedIds = new Set(updatedSessions.map((s) => s.id));
-
-    // Keep sessions from current state that aren't in the update
-    // (they were likely filtered out by the server's sync ownership filter)
-    // but exclude sessions that were intentionally deleted by the user
-    const preserved = current.sessions.filter(
-      (s) => !updatedIds.has(s.id) && !recentlyDeleted.has(s.id),
-    );
-
-    if (preserved.length === 0) return updated;
-
-    const merged = [...updatedSessions, ...preserved];
-
-    return {
-      ...updated,
-      sessions: merged,
-      sessionMeta: {
-        hasMore: updated.sessionMeta?.hasMore || current.sessionMeta?.hasMore || false,
-        total: Math.max(
-          updated.sessionMeta?.total ?? 0,
-          current.sessionMeta?.total ?? 0,
-        ),
-      },
-    };
-  });
-};
-
-const isUpdateAdditive = (
-  currentProjects: Project[],
-  updatedProjects: Project[],
-  selectedProject: Project | null,
-  selectedSession: ProjectSession | null,
-): boolean => {
-  if (!selectedProject || !selectedSession) {
-    return true;
-  }
-
-  const currentSelectedProject = currentProjects.find((project) => project.name === selectedProject.name);
-  const updatedSelectedProject = updatedProjects.find((project) => project.name === selectedProject.name);
-
-  if (!currentSelectedProject || !updatedSelectedProject) {
-    return false;
-  }
-
-  const currentSelectedSession = getProjectSessions(currentSelectedProject).find(
-    (session) => session.id === selectedSession.id,
-  );
-  const updatedSelectedSession = getProjectSessions(updatedSelectedProject).find(
-    (session) => session.id === selectedSession.id,
-  );
-
-  if (!currentSelectedSession || !updatedSelectedSession) {
-    return false;
-  }
-
-  return (
-    currentSelectedSession.id === updatedSelectedSession.id &&
-    currentSelectedSession.title === updatedSelectedSession.title &&
-    currentSelectedSession.created_at === updatedSelectedSession.created_at &&
-    currentSelectedSession.updated_at === updatedSelectedSession.updated_at
-  );
-};
-
 const VALID_TABS: Set<string> = new Set(['chat', 'files', 'shell', 'git', 'tasks', 'preview']);
 
 const isValidTab = (tab: string): tab is AppTab => {
@@ -174,9 +89,7 @@ const readPersistedTab = (): AppTab => {
 export function useProjectsState({
   sessionId,
   navigate,
-  latestMessage,
   isMobile,
-  activeSessions,
 }: UseProjectsStateArgs) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -193,17 +106,12 @@ export function useProjectsState({
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
-  const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('agents');
-  const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
 
-  const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Track recently deleted session IDs to prevent mergeProjectSessions from
-  // resurrecting them when a WebSocket update arrives before state propagates
-  const recentlyDeletedSessionsRef = useRef<Set<string>>(new Set());
+  // Trailing-debounce timer for projects refetch on session_updated/session_deleted
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchProjects = useCallback(async ({ showLoadingState = true }: FetchProjectsOptions = {}) => {
     try {
@@ -252,100 +160,27 @@ export function useProjectsState({
     }
   }, [isLoadingProjects, projects, selectedProject, sessionId]);
 
+  // Session events arrive as CustomEvents dispatched straight from the WS
+  // onmessage handler (lossless — see WebSocketContext). Keep sidebar counts
+  // fresh with a trailing-debounced silent refetch: each create/delete event
+  // re-arms the timer, so a burst results in a single refetch 2s after the last.
   useEffect(() => {
-    if (!latestMessage) {
-      return;
-    }
-
-    if (latestMessage.type === 'loading_progress') {
-      if (loadingProgressTimeoutRef.current) {
-        clearTimeout(loadingProgressTimeoutRef.current);
-        loadingProgressTimeoutRef.current = null;
+    return subscribeSessionsChanged((msg) => {
+      if (msg.type === 'session_updated' || msg.type === 'session_deleted') {
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(() => {
+          refreshTimerRef.current = null;
+          void refreshProjectsSilently();
+        }, 2000);
       }
-
-      setLoadingProgress(latestMessage as LoadingProgress);
-
-      if (latestMessage.phase === 'complete') {
-        loadingProgressTimeoutRef.current = setTimeout(() => {
-          setLoadingProgress(null);
-          loadingProgressTimeoutRef.current = null;
-        }, 500);
-      }
-
-      return;
-    }
-
-    if (latestMessage.type !== 'projects_updated') {
-      return;
-    }
-
-    const projectsMessage = latestMessage as ProjectsUpdatedMessage;
-
-    if (projectsMessage.changedFile && selectedSession && selectedProject) {
-      const normalized = projectsMessage.changedFile.replace(/\\/g, '/');
-      const changedFileParts = normalized.split('/');
-
-      if (changedFileParts.length >= 2) {
-        const filename = changedFileParts[changedFileParts.length - 1];
-        const changedSessionId = filename.replace('.jsonl', '');
-
-        if (changedSessionId === selectedSession.id) {
-          const isSessionActive = activeSessions.has(selectedSession.id);
-
-          if (!isSessionActive) {
-            setExternalMessageUpdate((prev) => prev + 1);
-          }
-        }
-      }
-    }
-
-    const hasActiveSession =
-      (selectedSession && activeSessions.has(selectedSession.id)) ||
-      (activeSessions.size > 0 && Array.from(activeSessions).some((id) => id.startsWith('new-session-')));
-
-    // Merge with current state to preserve sessions that the server's sync
-    // ownership filter may have excluded from this WebSocket update
-    const updatedProjects = mergeProjectSessions(projects, projectsMessage.projects, recentlyDeletedSessionsRef.current);
-
-    if (
-      hasActiveSession &&
-      !isUpdateAdditive(projects, updatedProjects, selectedProject, selectedSession)
-    ) {
-      return;
-    }
-
-    setProjects(updatedProjects);
-
-    if (!selectedProject) {
-      return;
-    }
-
-    const updatedSelectedProject = updatedProjects.find(
-      (project) => project.name === selectedProject.name,
-    );
-
-    if (!updatedSelectedProject) {
-      return;
-    }
-
-    if (serialize(updatedSelectedProject) !== serialize(selectedProject)) {
-      setSelectedProject(updatedSelectedProject);
-    }
-
-    if (!selectedSession) {
-      return;
-    }
-
-    // Don't clear selectedSession here — the session may exist in pagination
-    // (additionalSessions) or simply not be in this WebSocket update's initial batch.
-    // Session deletion is handled explicitly via handleSessionDelete.
-  }, [latestMessage, selectedProject, selectedSession, activeSessions, projects]);
+    });
+  }, [refreshProjectsSilently]);
 
   useEffect(() => {
     return () => {
-      if (loadingProgressTimeoutRef.current) {
-        clearTimeout(loadingProgressTimeoutRef.current);
-        loadingProgressTimeoutRef.current = null;
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
       }
     };
   }, []);
@@ -479,13 +314,6 @@ export function useProjectsState({
         navigate('/');
       }
 
-      // Track this deletion so mergeProjectSessions won't resurrect it
-      // from a stale WebSocket update arriving within the next 10 seconds
-      recentlyDeletedSessionsRef.current.add(sessionIdToDelete);
-      setTimeout(() => {
-        recentlyDeletedSessionsRef.current.delete(sessionIdToDelete);
-      }, 10_000);
-
       setProjects((prevProjects) =>
         prevProjects.map((project) => ({
           ...project,
@@ -570,7 +398,6 @@ export function useProjectsState({
       onSessionDelete: handleSessionDelete,
       onProjectDelete: handleProjectDelete,
       isLoading: isLoadingProjects,
-      loadingProgress,
       onRefresh: handleSidebarRefresh,
       onShowSettings: () => setShowSettings(true),
       showSettings,
@@ -587,7 +414,6 @@ export function useProjectsState({
       handleSidebarRefresh,
       isLoadingProjects,
       isMobile,
-      loadingProgress,
       projects,
       settingsInitialTab,
       selectedProject,
@@ -603,11 +429,9 @@ export function useProjectsState({
     activeTab,
     sidebarOpen,
     isLoadingProjects,
-    loadingProgress,
     isInputFocused,
     showSettings,
     settingsInitialTab,
-    externalMessageUpdate,
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,
