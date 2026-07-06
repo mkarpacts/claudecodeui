@@ -202,19 +202,23 @@ function ChatInterface({
     setPendingPermissionRequests,
   });
 
-  // On WebSocket reconnect, re-fetch the current session's messages from the server
-  // so missed streaming events are shown. Also reset isLoading.
+  // On WebSocket reconnect, ask the server for the real session state — the
+  // session-status response sets isLoading/canAbortSession via
+  // useChatRealtimeHandlers, and the server re-attaches the session writer as
+  // a side effect. Take over the stream BEFORE snapshotting: everything the
+  // SDK emits after the snapshot then flows to this socket, and the overlap
+  // between snapshot and live stream dedupes by message uuid.
   const handleWebSocketReconnect = useCallback(async () => {
     if (!selectedProject || !selectedSession) return;
     const providerVal = (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
+    const provider = (selectedSession.__provider || providerVal) as SessionProvider;
+    sendMessage({ type: 'check-session-status', sessionId: selectedSession.id, provider });
     await sessionStore.refreshFromServer(selectedSession.id, {
-      provider: (selectedSession.__provider || providerVal) as SessionProvider,
+      provider,
       projectName: selectedProject.name,
       projectPath: selectedProject.fullPath || selectedProject.path || '',
     });
-    setIsLoading(false);
-    setCanAbortSession(false);
-  }, [selectedProject, selectedSession, sessionStore, setIsLoading, setCanAbortSession]);
+  }, [selectedProject, selectedSession, sessionStore, sendMessage]);
 
   useChatRealtimeHandlers({
     latestMessage,

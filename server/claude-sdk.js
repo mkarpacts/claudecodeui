@@ -33,6 +33,7 @@ import { broadcastToUser } from './lib/wsHub.js';
 import { pluginConfigsFromEnv } from './lib/pluginConfig.js';
 import { skillsCache } from './lib/skillsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
+import { reattachUserSessions } from './lib/reattachSessions.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -1064,6 +1065,16 @@ function reconnectSessionWriter(sessionId, newRawWs) {
   return true;
 }
 
+/**
+ * Re-attach the writers of ALL active sessions owned by userId to a new raw
+ * WebSocket. Called on every new authenticated chat connection so streams
+ * survive reconnects without an explicit check-session-status from the client.
+ * @returns {number} how many writers were re-attached
+ */
+function reattachUserSessionWriters(userId, newRawWs) {
+  return reattachUserSessions(activeSessions, userId, newRawWs);
+}
+
 // Export public API
 export {
   queryClaudeSDK,
@@ -1072,5 +1083,6 @@ export {
   getActiveClaudeSDKSessions,
   resolveToolApproval,
   getPendingApprovalsForSession,
-  reconnectSessionWriter
+  reconnectSessionWriter,
+  reattachUserSessionWriters
 };

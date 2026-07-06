@@ -7,6 +7,7 @@ import { dispatchSessionsChanged } from '../utils/sessionEvents';
 const SESSION_EVENT_TYPES = new Set(['session_updated', 'session_renamed', 'session_deleted']);
 
 const RECONNECT_DELAY_MS = 3_000;
+const PING_TIMEOUT_MS = 5_000;
 const MAX_PENDING_MESSAGES = 10;
 
 type WebSocketContextType = {
@@ -46,10 +47,19 @@ const useWebSocketProviderState = (): WebSocketContextType => {
 
   useEffect(() => {
     let cancelled = false;
+    let connecting = false; // a socket is between new WebSocket() and open/close — blocks duplicate connects
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let pingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearPingTimeout = () => {
+      if (pingTimeout) {
+        clearTimeout(pingTimeout);
+        pingTimeout = null;
+      }
+    };
 
     const doConnect = () => {
-      if (cancelled) return;
+      if (cancelled || connecting) return; // wsRef stays null while CONNECTING; this guard prevents a second concurrent socket
       try {
         const wsUrl = buildWebSocketUrl(token);
         if (!wsUrl) {
@@ -58,9 +68,11 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         }
 
         console.log('[WS] Connecting…');
+        connecting = true;
         const websocket = new WebSocket(wsUrl);
 
         websocket.onopen = () => {
+          connecting = false;
           if (cancelled) { websocket.close(); return; }
           console.log(`[WS] ${hasConnectedRef.current ? 'Reconnected' : 'Connected'}`);
           setIsConnected(true);
@@ -84,6 +96,10 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           if (cancelled) return;
           try {
             const data = JSON.parse(event.data);
+            if (data?.type === 'pong') {
+              clearPingTimeout();
+              return;
+            }
             // Session-list events must be delivered losslessly. latestMessage is a
             // single state value: during streaming the server sends session_updated
             // immediately followed by status/complete, and React coalesces the state
@@ -99,7 +115,9 @@ const useWebSocketProviderState = (): WebSocketContextType => {
         };
 
         websocket.onclose = (event) => {
+          connecting = false;
           if (cancelled) return;
+          clearPingTimeout();
           console.warn(`[WS] Disconnected (code=${event.code}, reason=${event.reason || 'none'})`);
           setIsConnected(false);
           wsRef.current = null;
@@ -112,14 +130,50 @@ const useWebSocketProviderState = (): WebSocketContextType => {
           console.error('WebSocket error:', error);
         };
       } catch (error) {
+        connecting = false;
         console.error('Error creating WebSocket connection:', error);
       }
     };
+
+    // Tabs woken from sleep can hold a half-open socket that still reports
+    // OPEN but is dead on the wire (the server closed it while the tab was
+    // frozen, so onclose never fired). Verify whenever the tab becomes visible.
+    const verifyConnection = () => {
+      if (cancelled || document.visibilityState !== 'visible') return;
+      const socket = wsRef.current;
+      if (!socket) {
+        // The reconnect timer may have been throttled away while the tab slept
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+        }
+        doConnect();
+        return;
+      }
+      if (socket.readyState !== WebSocket.OPEN) return; // CONNECTING/CLOSING — let normal handlers run
+      if (pingTimeout) return; // probe already in flight
+      try {
+        socket.send(JSON.stringify({ type: 'ping' }));
+      } catch {
+        socket.close();
+        return;
+      }
+      // Server answers ping synchronously, so 5s comfortably covers a healthy
+      // round-trip; a miss means the socket is dead, not merely slow.
+      pingTimeout = setTimeout(() => {
+        pingTimeout = null;
+        console.warn('[WS] Ping timed out — closing zombie socket');
+        socket.close(); // fires onclose → normal reconnect path
+      }, PING_TIMEOUT_MS);
+    };
+    document.addEventListener('visibilitychange', verifyConnection);
 
     doConnect();
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', verifyConnection);
+      clearPingTimeout();
       if (reconnectTimeout) {
         clearTimeout(reconnectTimeout);
         reconnectTimeout = null;

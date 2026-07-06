@@ -105,7 +105,15 @@ export function useChatSessionState({
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [totalMessages, setTotalMessages] = useState(0);
   const [canAbortSession, setCanAbortSession] = useState(false);
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const [isUserScrolledUp, setIsUserScrolledUpState] = useState(false);
+  const isUserScrolledUpRef = useRef(false); // mirror read inside deferred callbacks
+  const programmaticScrollRef = useRef(false); // set around our own scrolls so handleScroll ignores them
+  // Single writer for the guard: keeps the ref and state in lockstep so no
+  // caller (including external consumers of this setter) can desync them.
+  const setIsUserScrolledUp = useCallback((value: boolean) => {
+    isUserScrolledUpRef.current = value;
+    setIsUserScrolledUpState(value);
+  }, []);
   const [tokenBudget, setTokenBudget] = useState<Record<string, unknown> | null>(null);
   const [visibleMessageCount, setVisibleMessageCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const [claudeStatus, setClaudeStatus] = useState<{ text: string; tokens: number; can_interrupt: boolean } | null>(null);
@@ -204,17 +212,22 @@ export function useChatSessionState({
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    const prevTop = container.scrollTop;
     container.scrollTop = container.scrollHeight;
+    // Flag only when the position actually changed — a no-op assignment fires
+    // no scroll event and a stale flag would swallow the user's next scroll.
+    if (container.scrollTop !== prevTop) programmaticScrollRef.current = true;
   }, []);
 
   const scrollToBottomAndReset = useCallback(() => {
+    setIsUserScrolledUp(false); // explicit user intent: stick to bottom again
     scrollToBottom();
     if (allMessagesLoaded) {
       setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
       setAllMessagesLoaded(false);
       allMessagesLoadedRef.current = false;
     }
-  }, [allMessagesLoaded, scrollToBottom]);
+  }, [allMessagesLoaded, scrollToBottom, setIsUserScrolledUp]);
 
   const isNearBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -261,6 +274,11 @@ export function useChatSessionState({
     const container = scrollContainerRef.current;
     if (!container) return;
 
+    if (programmaticScrollRef.current) {
+      programmaticScrollRef.current = false;
+      return; // our own jump — must not touch the user-scroll guard
+    }
+
     const nearBottom = isNearBottom();
     setIsUserScrolledUp(!nearBottom);
 
@@ -274,7 +292,7 @@ export function useChatSessionState({
       const didLoad = await loadOlderMessages(container);
       if (didLoad) topLoadLockRef.current = true;
     }
-  }, [isNearBottom, loadOlderMessages]);
+  }, [isNearBottom, loadOlderMessages, setIsUserScrolledUp]);
 
   useLayoutEffect(() => {
     if (!pendingScrollRestoreRef.current || !scrollContainerRef.current) return;
@@ -294,7 +312,7 @@ export function useChatSessionState({
     topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
     setIsUserScrolledUp(false);
-  }, [selectedProject?.name, selectedSession?.id]);
+  }, [selectedProject?.name, selectedSession?.id, setIsUserScrolledUp]);
 
   // Initial scroll to bottom
   useEffect(() => {
@@ -543,7 +561,13 @@ export function useChatSessionState({
     if (searchScrollActiveRef.current) return;
 
     if (autoScrollToBottom) {
-      if (!isUserScrolledUp) setTimeout(() => scrollToBottom(), 50);
+      // Guard must be re-read when the timeout fires: the user may scroll up
+      // during the 50 ms window and the captured state value would be stale.
+      if (!isUserScrolledUp) {
+        setTimeout(() => {
+          if (!isUserScrolledUpRef.current) scrollToBottom();
+        }, 50);
+      }
       return;
     }
 

@@ -45,7 +45,7 @@ import fetch from 'node-fetch';
 import mime from 'mime-types';
 
 import { renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache, searchConversations } from './projects.js';
-import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval, getPendingApprovalsForSession, reconnectSessionWriter } from './claude-sdk.js';
+import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getActiveClaudeSDKSessions, resolveToolApproval, getPendingApprovalsForSession, reconnectSessionWriter, reattachUserSessionWriters } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getActiveCodexSessions } from './openai-codex.js';
 import { spawnGemini, abortGeminiSession, isGeminiSessionActive, getActiveGeminiSessions } from './gemini-cli.js';
@@ -1415,11 +1415,23 @@ function handleChatConnection(ws, request) {
     // Wrap WebSocket with writer for consistent interface with SSEStreamWriter
     const writer = new WebSocketWriter(ws, userId);
 
+    // Re-attach any in-flight session streams owned by this user to the new
+    // socket, so SDK output keeps flowing after a refresh/reconnect even if
+    // the client never sends check-session-status.
+    if (userId != null) {
+        try {
+            const reattached = reattachUserSessionWriters(userId, ws);
+            if (reattached > 0) console.log(`[RECONNECT] Auto-reattached ${reattached} active session(s) for user ${userId}`);
+        } catch (e) {
+            console.warn('[RECONNECT] Auto-reattach failed:', e.message);
+        }
+    }
+
     ws.on('message', async (message) => {
         try {
             const data = JSON.parse(message);
 
-            if (data.type === 'ping') return; // tolerate app-level client pings (keepalive is server-side, see wss heartbeat)
+            if (data.type === 'ping') { writer.send({ type: 'pong' }); return; } // client probes for zombie sockets on tab wake
 
             if (data.type === 'claude-command') {
                 console.log('[DEBUG] User message:', data.command || '[Continue/Resume]');
