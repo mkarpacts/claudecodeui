@@ -1,4 +1,5 @@
 import { IS_PLATFORM } from "../constants/config";
+import { AUTH_EXPIRED_EVENT } from "../components/auth/constants";
 
 // Utility function for authenticated API calls
 export const authenticatedFetch = (url, options = {}) => {
@@ -25,6 +26,13 @@ export const authenticatedFetch = (url, options = {}) => {
     const refreshedToken = response.headers.get('X-Refreshed-Token');
     if (refreshedToken) {
       localStorage.setItem('auth-token', refreshedToken);
+    }
+    // A 401 on a request that carried a token means the session is dead
+    // (expired JWT or rotated secret). Without a global signal every feature
+    // fails with its own cryptic error (silent WS drops, "Failed to upload
+    // files") — route them all to one re-login prompt instead.
+    if (response.status === 401 && !IS_PLATFORM && token) {
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
     }
     return response;
   });

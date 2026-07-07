@@ -72,7 +72,10 @@ const authenticateToken = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Token verification error:', error);
-    return res.status(403).json({ error: 'Invalid token' });
+    // 401, not 403: an expired/invalid token means "not authenticated" —
+    // the client's global session-expired handler listens for 401 only
+    // (403 is reserved for permission denials like requireAdmin).
+    return res.status(401).json({ error: 'Invalid token' });
   }
 };
 

@@ -119,6 +119,12 @@ export function useProjectsState({
         setIsLoadingProjects(true);
       }
       const response = await api.projects();
+      // Error bodies are { error: string }, not an array — feeding one into
+      // setProjects crashes every projects.map downstream (white page).
+      if (!response.ok) {
+        console.error(`Error fetching projects: HTTP ${response.status}`);
+        return;
+      }
       const projectData = (await response.json()) as Project[];
 
       setProjects((prevProjects) => {
@@ -331,6 +337,10 @@ export function useProjectsState({
   const handleSidebarRefresh = useCallback(async () => {
     try {
       const response = await api.projects();
+      if (!response.ok) {
+        console.error(`Error refreshing projects: HTTP ${response.status}`);
+        return;
+      }
       const freshProjects = (await response.json()) as Project[];
 
       setProjects((prevProjects) =>

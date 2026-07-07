@@ -553,7 +553,13 @@ export function useChatComposerState({
           );
 
           if (!response.ok) {
-            throw new Error('Failed to upload files');
+            // Server error paths respond with { error: string }; non-JSON
+            // bodies (e.g. nginx 413 HTML page) fall back to the status only.
+            const detail = await response
+              .json()
+              .then((body) => (typeof body?.error === 'string' ? body.error : null))
+              .catch(() => null);
+            throw new Error(detail ? `${detail} (HTTP ${response.status})` : `HTTP ${response.status}`);
           }
 
           const result = await response.json();

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
-import { AUTH_ERROR_MESSAGES, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY, readStoredToken } from '../constants';
+import { AUTH_ERROR_MESSAGES, AUTH_EXPIRED_EVENT, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY, readStoredToken } from '../constants';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -63,6 +63,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [authConfigured, setAuthConfigured] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Kept separate from `error`: clearing the token changes checkAuthStatus's
+  // identity (token is in its deps), the mount effect re-runs it, and its
+  // first line is setError(null) — which would wipe the message before the
+  // login screen ever renders it.
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const setSession = useCallback((nextUser: AuthUser, nextToken: string) => {
     setUser(nextUser);
@@ -108,6 +113,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (fragment.token) {
         persistToken(fragment.token);
         setToken(fragment.token);
+        setSessionExpired(false);
       }
 
       const activeToken = fragment.token || token;
@@ -159,6 +165,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     void checkAuthStatus();
   }, [checkAuthStatus, checkOnboardingStatus]);
 
+  // Global 401 signal from authenticatedFetch — one re-login prompt instead of
+  // every feature failing with its own error (dead WS, failed uploads, ...).
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      clearSession();
+      setSessionExpired(true);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleSessionExpired);
+  }, [clearSession]);
+
   const loginWithMicrosoft = useCallback(() => {
     window.location.href = '/api/auth/microsoft';
   }, []);
@@ -190,7 +208,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isLoading,
       authConfigured,
       hasCompletedOnboarding,
-      error,
+      error: sessionExpired ? AUTH_ERROR_MESSAGES.sessionExpired : error,
       loginWithMicrosoft,
       logout,
       refreshOnboardingStatus,
@@ -205,6 +223,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       loginWithMicrosoft,
       logout,
       refreshOnboardingStatus,
+      sessionExpired,
       token,
       user,
     ],
