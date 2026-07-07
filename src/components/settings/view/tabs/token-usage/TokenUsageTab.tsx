@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Coins, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { ChevronDown, ChevronUp, Coins, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '../../../../../contexts/AuthContext';
 import { api } from '../../../../../utils/api';
 import TokenUsageSessionDetail from './TokenUsageSessionDetail';
 import Pagination from './Pagination';
@@ -9,6 +10,7 @@ import { getModelBadgeClass, getModelShortName, formatTokens, formatCost, format
 import type {
   SessionSummary,
   UsageTotals,
+  UsageUser,
   SortColumn,
   SortDir,
   PeriodPreset,
@@ -24,6 +26,22 @@ const SORT_COLUMNS: { key: SortColumn; labelKey: string }[] = [
 
 export default function TokenUsageTab() {
   const { t } = useTranslation('settings');
+
+  const { user, hasPermission } = useAuth();
+  const canViewAll = Boolean(user?.isAdmin || hasPermission('view_all_usage'));
+
+  // User filter (privileged users only)
+  const [userFilter, setUserFilter] = useState('');
+  const [users, setUsers] = useState<UsageUser[]>([]);
+
+  useEffect(() => {
+    if (!canViewAll) return;
+    api.usageStats.users()
+      .then(async (res) => {
+        if (res.ok) setUsers(await res.json());
+      })
+      .catch(() => { /* filter dropdown just stays empty */ });
+  }, [canViewAll]);
 
   // Filters
   const [period, setPeriod] = useState<PeriodPreset>('last30days');
@@ -45,6 +63,7 @@ export default function TokenUsageTab() {
   const [totals, setTotals] = useState<UsageTotals | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   // Detail view
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
@@ -68,6 +87,7 @@ export default function TokenUsageTab() {
         from: dateRange.from,
         to: dateRange.to,
         model: modelFilter || undefined,
+        userId: userFilter || undefined,
         sortBy,
         sortDir,
         limit: perPage,
@@ -76,7 +96,7 @@ export default function TokenUsageTab() {
 
       const [sessionsRes, summaryRes] = await Promise.all([
         api.usageStats.sessions(params),
-        api.usageStats.summary({ from: dateRange.from, to: dateRange.to, model: modelFilter || undefined }),
+        api.usageStats.summary({ from: dateRange.from, to: dateRange.to, model: modelFilter || undefined, userId: userFilter || undefined }),
       ]);
 
       if (!sessionsRes.ok) throw new Error(`Server error (${sessionsRes.status})`);
@@ -94,10 +114,10 @@ export default function TokenUsageTab() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, modelFilter, sortBy, sortDir, perPage, page]);
+  }, [dateRange, modelFilter, userFilter, sortBy, sortDir, perPage, page]);
 
   // Track filter identity — when filters change, reset page to 0 then fetch
-  const filterKey = `${dateRange.from}|${dateRange.to}|${modelFilter}|${sortBy}|${sortDir}|${perPage}`;
+  const filterKey = `${dateRange.from}|${dateRange.to}|${modelFilter}|${userFilter}|${sortBy}|${sortDir}|${perPage}`;
   const prevFilterKey = useRef(filterKey);
 
   useEffect(() => {
@@ -118,6 +138,26 @@ export default function TokenUsageTab() {
     } else {
       setSortBy(col);
       setSortDir('desc');
+    }
+  };
+
+  const handleExport = async (e: MouseEvent, session: SessionSummary) => {
+    e.stopPropagation();
+    setExportError(null);
+    try {
+      const res = await api.usageStats.exportSession(session.session_id);
+      if (!res.ok) throw new Error(`Server error (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `token-usage-${session.session_id}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setExportError(t('tokenUsage.exportError'));
     }
   };
 
@@ -187,6 +227,20 @@ export default function TokenUsageTab() {
           <option value="haiku">Haiku</option>
         </select>
 
+        {/* User dropdown (admin / view_all_usage only) */}
+        {canViewAll && (
+          <select
+            value={userFilter}
+            onChange={(e) => setUserFilter(e.target.value)}
+            className="rounded-lg border border-border bg-card py-1.5 pl-3 pr-8 text-sm text-foreground"
+          >
+            <option value="">{t('tokenUsage.user.all')}</option>
+            {users.map((u) => (
+              <option key={u.id} value={String(u.id)}>{u.username}</option>
+            ))}
+          </select>
+        )}
+
         {/* Summary stats (right-aligned) */}
         {totals && (
           <div className="ml-auto flex items-center gap-4 text-xs text-muted-foreground">
@@ -209,6 +263,20 @@ export default function TokenUsageTab() {
         <div className="rounded-lg border border-border bg-card p-4 text-sm text-destructive">{error}</div>
       )}
 
+      {/* Export error (does not hide the table) */}
+      {exportError && (
+        <div className="flex items-center justify-between rounded-lg border border-border bg-card p-4 text-sm text-destructive">
+          <span>{exportError}</span>
+          <button
+            onClick={() => setExportError(null)}
+            className="ml-4 text-muted-foreground hover:text-foreground"
+            aria-label={t('common:buttons.close')}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       {!loading && !error && (
         <>
@@ -218,7 +286,9 @@ export default function TokenUsageTab() {
                 <tr className="border-b border-border bg-muted/50">
                   <th className="w-10 px-3 py-2.5 text-left font-medium text-muted-foreground">{t('tokenUsage.table.number')}</th>
                   <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">{t('tokenUsage.table.session')}</th>
-                  <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">{t('tokenUsage.table.user')}</th>
+                  {canViewAll && (
+                    <th className="px-3 py-2.5 text-left font-medium text-muted-foreground">{t('tokenUsage.table.user')}</th>
+                  )}
                   {SORT_COLUMNS.map((col) => (
                     <th
                       key={col.key}
@@ -235,6 +305,7 @@ export default function TokenUsageTab() {
                       </span>
                     </th>
                   ))}
+                  <th className="w-10 px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody>
@@ -267,7 +338,9 @@ export default function TokenUsageTab() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{s.username || '\u2014'}</td>
+                    {canViewAll && (
+                      <td className="px-3 py-2.5 text-muted-foreground">{s.username || '\u2014'}</td>
+                    )}
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
                       <Tooltip content={`Input: ${formatTokens(s.total_input)} | Cache read: ${formatTokens(s.total_cache_read)} | Cache create: ${formatTokens(s.total_cache_create)}`} position="top" delay={200}>
                         <span>{formatTokens(s.total_context)}</span>
@@ -277,11 +350,21 @@ export default function TokenUsageTab() {
                     <td className="px-3 py-2.5 text-right tabular-nums font-medium text-foreground">{formatTokens(s.total_tokens)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{formatCost(s.total_cost)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{s.turn_count}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={(e) => handleExport(e, s)}
+                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        title={t('tokenUsage.export')}
+                        aria-label={t('tokenUsage.export')}
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {sessions.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-12 text-center text-muted-foreground">
+                    <td colSpan={canViewAll ? 9 : 8} className="px-3 py-12 text-center text-muted-foreground">
                       {t('tokenUsage.noSessions')}
                     </td>
                   </tr>

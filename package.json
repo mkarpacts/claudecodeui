@@ -37,7 +37,7 @@
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/fix-node-pty.js",
     "prepare": "husky",
-    "test": "node --test \"server/services/attachments/**/*.test.js\" \"server/lib/*.test.js\""
+    "test": "node --test \"server/services/attachments/**/*.test.js\" \"server/lib/*.test.js\" \"server/database/*.test.js\""
   },
   "keywords": [
     "claude code",

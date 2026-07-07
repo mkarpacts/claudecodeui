@@ -259,11 +259,12 @@ export const api = {
 
   // Token Usage Statistics
   usageStats: {
-    sessions: ({ from, to, model, sortBy, sortDir, limit, offset } = {}) => {
+    sessions: ({ from, to, model, userId, sortBy, sortDir, limit, offset } = {}) => {
       const params = new URLSearchParams();
       if (from) params.append('from', from);
       if (to) params.append('to', to);
       if (model) params.append('model', model);
+      if (userId != null) params.append('userId', String(userId));
       if (sortBy) params.append('sortBy', sortBy);
       if (sortDir) params.append('sortDir', sortDir);
       if (limit != null) params.append('limit', String(limit));
@@ -271,11 +272,12 @@ export const api = {
       const qs = params.toString();
       return authenticatedFetch(`/api/usage-stats/sessions${qs ? `?${qs}` : ''}`);
     },
-    summary: ({ from, to, model } = {}) => {
+    summary: ({ from, to, model, userId } = {}) => {
       const params = new URLSearchParams();
       if (from) params.append('from', from);
       if (to) params.append('to', to);
       if (model) params.append('model', model);
+      if (userId != null) params.append('userId', String(userId));
       const qs = params.toString();
       return authenticatedFetch(`/api/usage-stats/summary${qs ? `?${qs}` : ''}`);
     },
@@ -286,6 +288,9 @@ export const api = {
       const qs = params.toString();
       return authenticatedFetch(`/api/usage-stats/sessions/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`);
     },
+    users: () => authenticatedFetch('/api/usage-stats/users'),
+    exportSession: (sessionId) =>
+      authenticatedFetch(`/api/usage-stats/sessions/${encodeURIComponent(sessionId)}/export`),
   },
 
   // Git Sync

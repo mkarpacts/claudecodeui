@@ -30,15 +30,12 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SettingsSidebar({ activeTab, onChange }: SettingsSidebarProps) {
   const { t } = useTranslation('settings');
-  const { user, hasPermission } = useAuth();
-  const canViewUsage = user?.isAdmin || hasPermission('view_all_usage');
-  const navItems = canViewUsage
-    ? [
-        ...NAV_ITEMS,
-        { id: 'tokenUsage' as const, labelKey: 'mainTabs.tokenUsage', icon: Coins },
-        ...(user?.isAdmin ? [{ id: 'admin' as const, labelKey: 'mainTabs.admin', icon: Shield }] : []),
-      ]
-    : NAV_ITEMS;
+  const { user } = useAuth();
+  const navItems = [
+    ...NAV_ITEMS,
+    { id: 'tokenUsage' as const, labelKey: 'mainTabs.tokenUsage', icon: Coins },
+    ...(user?.isAdmin ? [{ id: 'admin' as const, labelKey: 'mainTabs.admin', icon: Shield }] : []),
+  ];
 
   return (
     <>

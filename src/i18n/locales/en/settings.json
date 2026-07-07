@@ -563,6 +563,11 @@
       "label": "Model",
       "all": "All models"
     },
+    "user": {
+      "all": "All users"
+    },
+    "export": "Download CSV",
+    "exportError": "Failed to export session",
     "summary": {
       "sessions": "Sessions",
       "totalTokens": "Total tokens",

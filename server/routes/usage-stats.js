@@ -1,6 +1,7 @@
 import express from 'express';
 import { usageDb, permissionsDb } from '../database/db.js';
 import { isAdmin } from '../middleware/auth.js';
+import { buildSessionTurnsCsv } from '../lib/usageCsv.js';
 
 const router = express.Router();
 
@@ -12,13 +13,21 @@ function getDefaultDateRange() {
   };
 }
 
-// Access guard: only admin or users with view_all_usage can access usage stats
+// Every authenticated user may access usage stats; non-privileged users
+// are restricted to their own sessions via resolveUserScope below.
 router.use((req, res, next) => {
-  if (isAdmin(req.user) || permissionsDb.hasPermission(req.user.id, 'view_all_usage')) {
-    return next();
-  }
-  return res.status(403).json({ error: 'Access denied' });
+  req.canViewAllUsage = isAdmin(req.user) || permissionsDb.hasPermission(req.user.id, 'view_all_usage');
+  next();
 });
+
+// Resolve the user_id the query must be scoped to:
+// - regular user: always their own id
+// - admin / view_all_usage: optional ?userId= filter, otherwise all users (null)
+function resolveUserScope(req) {
+  if (!req.canViewAllUsage) return req.user.id;
+  const requested = parseInt(req.query.userId, 10);
+  return Number.isNaN(requested) ? null : requested;
+}
 
 /**
  * GET /api/usage-stats/sessions
@@ -42,6 +51,7 @@ router.get('/sessions', (req, res) => {
       from: from || defaults.from,
       to: to || defaults.to,
       model: model || null,
+      userId: resolveUserScope(req),
       sortBy,
       sortDir,
       limit: Math.min(parseInt(limit, 10) || 10, 50),
@@ -68,12 +78,56 @@ router.get('/summary', (req, res) => {
       from: from || defaults.from,
       to: to || defaults.to,
       model: model || null,
+      userId: resolveUserScope(req),
     });
 
     res.json(totals);
   } catch (error) {
     console.error('Error fetching usage summary:', error.message);
     res.status(500).json({ error: 'Failed to fetch usage summary' });
+  }
+});
+
+/**
+ * GET /api/usage-stats/users
+ * Users that have usage rows — feeds the user filter (privileged only).
+ */
+router.get('/users', (req, res) => {
+  if (!req.canViewAllUsage) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  try {
+    res.json(usageDb.getUsageUsers());
+  } catch (error) {
+    console.error('Error fetching usage users:', error.message);
+    res.status(500).json({ error: 'Failed to fetch usage users' });
+  }
+});
+
+/**
+ * GET /api/usage-stats/sessions/:sessionId/export
+ * Downloads all turns of a session (incl. query text) as CSV.
+ */
+router.get('/sessions/:sessionId/export', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const scopeUserId = req.canViewAllUsage ? null : req.user.id;
+
+    // LIMIT -1 = no limit in SQLite — export always covers the whole session
+    const { items } = usageDb.getSessionTurns(sessionId, { limit: -1, offset: 0, userId: scopeUserId });
+
+    if (!items.length) {
+      // Unknown session, or a session that does not belong to this user
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    const safeName = sessionId.replace(/[^\w.-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="token-usage-${safeName}.csv"`);
+    res.send(buildSessionTurnsCsv(items));
+  } catch (error) {
+    console.error('Error exporting session:', error.message);
+    res.status(500).json({ error: 'Failed to export session' });
   }
 });
 
@@ -89,6 +143,7 @@ router.get('/sessions/:sessionId', (req, res) => {
     const result = usageDb.getSessionTurns(sessionId, {
       limit: Math.min(parseInt(limit, 10) || 10, 50),
       offset: parseInt(offset, 10) || 0,
+      userId: req.canViewAllUsage ? null : req.user.id,
     });
 
     res.json(result);

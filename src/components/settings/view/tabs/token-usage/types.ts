@@ -39,3 +39,8 @@ export type SortColumn = 'total_context' | 'total_output' | 'total_tokens' | 'to
 export type SortDir = 'asc' | 'desc';
 
 export type PeriodPreset = 'today' | 'last7days' | 'last30days' | 'last90days' | 'allTime' | 'custom';
+
+export type UsageUser = {
+  id: number;
+  username: string;
+};

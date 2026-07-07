@@ -744,14 +744,16 @@ const usageDb = {
     ).run(sessionId, model, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd, queryText, userId);
   },
 
-  getSessionsSummary: ({ from, to, model = null, sortBy = 'total_tokens', sortDir = 'desc', limit = 10, offset = 0 }) => {
+  getSessionsSummary: ({ from, to, model = null, userId = null, sortBy = 'total_tokens', sortDir = 'desc', limit = 10, offset = 0 }) => {
     const ALLOWED_SORT_COLUMNS = ['total_context', 'total_output', 'total_tokens', 'total_cost', 'turn_count', 'first_turn'];
     const ALLOWED_SORT_DIR = ['asc', 'desc'];
     const safeSortBy = ALLOWED_SORT_COLUMNS.includes(sortBy) ? sortBy : 'total_tokens';
     const safeSortDir = ALLOWED_SORT_DIR.includes(sortDir) ? sortDir : 'desc';
 
-    const baseWhere = `WHERE ul.created_at >= ? AND ul.created_at <= ?${model ? ' AND ul.model LIKE ?' : ''}`;
-    const params = model ? [from, to, `%${model}%`] : [from, to];
+    const baseWhere = `WHERE ul.created_at >= ? AND ul.created_at <= ?${model ? ' AND ul.model LIKE ?' : ''}${userId != null ? ' AND ul.user_id = ?' : ''}`;
+    const params = [from, to];
+    if (model) params.push(`%${model}%`);
+    if (userId != null) params.push(userId);
 
     const rows = db.prepare(`
       SELECT
@@ -769,7 +771,7 @@ const usageDb = {
         COUNT(*) AS turn_count,
         MIN(ul.created_at) AS first_turn,
         MAX(ul.created_at) AS last_turn,
-        (SELECT ul2.query_text FROM usage_log ul2 WHERE ul2.session_id = ul.session_id AND ul2.query_text IS NOT NULL AND ul2.query_text != '' ORDER BY ul2.created_at ASC LIMIT 1) AS first_query_text
+        (SELECT ul2.query_text FROM usage_log ul2 WHERE ul2.session_id = ul.session_id AND ul2.query_text IS NOT NULL AND ul2.query_text != '' ORDER BY ul2.created_at ASC, ul2.id ASC LIMIT 1) AS first_query_text
       FROM usage_log ul
       LEFT JOIN session_names sn ON sn.session_id = ul.session_id AND sn.provider = 'claude'
       LEFT JOIN users u ON u.id = ul.user_id
@@ -788,9 +790,11 @@ const usageDb = {
     return { items: rows, total: countRow?.total || 0 };
   },
 
-  getTotals: ({ from, to, model = null }) => {
-    const params = model ? [from, to, `%${model}%`] : [from, to];
-    const modelFilter = model ? ' AND model LIKE ?' : '';
+  getTotals: ({ from, to, model = null, userId = null }) => {
+    const params = [from, to];
+    if (model) params.push(`%${model}%`);
+    if (userId != null) params.push(userId);
+    const extraFilter = `${model ? ' AND model LIKE ?' : ''}${userId != null ? ' AND user_id = ?' : ''}`;
 
     return db.prepare(`
       SELECT
@@ -798,11 +802,14 @@ const usageDb = {
         COALESCE(SUM(COALESCE(cost_usd, 0)), 0) AS total_cost,
         COUNT(DISTINCT session_id) AS session_count
       FROM usage_log
-      WHERE created_at >= ? AND created_at <= ?${modelFilter}
+      WHERE created_at >= ? AND created_at <= ?${extraFilter}
     `).get(...params);
   },
 
-  getSessionTurns: (sessionId, { limit = 10, offset = 0 } = {}) => {
+  getSessionTurns: (sessionId, { limit = 10, offset = 0, userId = null } = {}) => {
+    const userFilter = userId != null ? ' AND user_id = ?' : '';
+    const params = userId != null ? [sessionId, userId] : [sessionId];
+
     const rows = db.prepare(`
       SELECT
         id, query_text, model,
@@ -813,16 +820,26 @@ const usageDb = {
         COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) + COALESCE(output_tokens, 0) AS total_tokens,
         COALESCE(cost_usd, 0) AS cost_usd, created_at
       FROM usage_log
-      WHERE session_id = ?
-      ORDER BY created_at ASC
+      WHERE session_id = ?${userFilter}
+      ORDER BY created_at ASC, id ASC
       LIMIT ? OFFSET ?
-    `).all(sessionId, limit, offset);
+    `).all(...params, limit, offset);
 
     const countRow = db.prepare(
-      'SELECT COUNT(*) AS total FROM usage_log WHERE session_id = ?'
-    ).get(sessionId);
+      `SELECT COUNT(*) AS total FROM usage_log WHERE session_id = ?${userFilter}`
+    ).get(...params);
 
     return { items: rows, total: countRow?.total || 0 };
+  },
+
+  // Distinct users that have usage rows — feeds the admin user filter
+  getUsageUsers: () => {
+    return db.prepare(`
+      SELECT DISTINCT u.id, u.username
+      FROM usage_log ul
+      JOIN users u ON u.id = ul.user_id
+      ORDER BY u.username COLLATE NOCASE ASC
+    `).all();
   },
 };
 
