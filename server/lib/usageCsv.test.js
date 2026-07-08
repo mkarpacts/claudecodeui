@@ -1,17 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { csvEscape, buildSessionTurnsCsv } from './usageCsv.js';
+import { csvEscape, buildSessionsSummaryCsv } from './usageCsv.js';
 
-const turn = (overrides = {}) => ({
-  query_text: 'hello',
-  model: 'claude-sonnet-4-6',
-  input_tokens: 10,
-  cache_read_tokens: 20,
-  cache_creation_tokens: 30,
-  output_tokens: 40,
-  total_tokens: 100,
-  cost_usd: 0.5,
-  created_at: '2026-07-07 10:00:00',
+const session = (overrides = {}) => ({
+  session_id: 'abc-123',
+  session_name: 'My session',
+  first_query_text: 'first question',
+  username: 'alice',
+  total_context: 1500,
+  total_output: 40,
+  total_tokens: 1540,
+  total_cost: 0.5,
+  turn_count: 6,
   ...overrides,
 });
 
@@ -40,28 +40,44 @@ test('csvEscape neutralizes Excel formula injection', () => {
 
 // No "sep=" hint line: Excel ignores the UTF-8 BOM when the file starts with
 // one and falls back to ANSI, garbling diacritics (reproduced via COM on Excel 16.0).
-test('buildSessionTurnsCsv starts with BOM followed directly by the header', () => {
-  const csv = buildSessionTurnsCsv([turn()]);
+test('buildSessionsSummaryCsv starts with BOM followed directly by the header', () => {
+  const csv = buildSessionsSummaryCsv([session()]);
   assert.ok(csv.startsWith('\uFEFF'));
   assert.equal(csv.slice(1, 2), '#');
   assert.ok(!csv.includes('sep='));
 });
 
-test('buildSessionTurnsCsv writes header and one line per turn in order', () => {
-  const csv = buildSessionTurnsCsv([turn(), turn({ query_text: 'second', cost_usd: 1.25 })]);
+test('buildSessionsSummaryCsv writes header and one line per session in order', () => {
+  const csv = buildSessionsSummaryCsv([session(), session({ session_name: 'Second', total_cost: 1.25 })]);
   const lines = csv.slice(1).trimEnd().split('\r\n');
   assert.equal(lines.length, 3); // header + 2 rows
-  assert.equal(lines[0], '#,time,query,model,input_tokens,cache_read_tokens,cache_creation_tokens,output_tokens,total_tokens,cost_usd');
-  assert.equal(lines[1], '1,2026-07-07 10:00:00,hello,claude-sonnet-4-6,10,20,30,40,100,0.5');
-  assert.equal(lines[2], '2,2026-07-07 10:00:00,second,claude-sonnet-4-6,10,20,30,40,100,1.25');
+  assert.equal(lines[0], '#,session,user,context_tokens,output_tokens,total_tokens,cost_usd,turns');
+  assert.equal(lines[1], '1,My session,alice,1500,40,1540,0.5,6');
+  assert.equal(lines[2], '2,Second,alice,1500,40,1540,1.25,6');
 });
 
-test('buildSessionTurnsCsv escapes query text with commas and newlines', () => {
-  const csv = buildSessionTurnsCsv([turn({ query_text: 'fix a, then\nb' })]);
+test('buildSessionsSummaryCsv falls back to first query text, then session id', () => {
+  const csv = buildSessionsSummaryCsv([
+    session({ session_name: null }),
+    session({ session_name: null, first_query_text: null }),
+  ]);
+  const lines = csv.slice(1).trimEnd().split('\r\n');
+  assert.equal(lines[1], '1,first question,alice,1500,40,1540,0.5,6');
+  assert.equal(lines[2], '2,abc-123,alice,1500,40,1540,0.5,6');
+});
+
+test('buildSessionsSummaryCsv escapes session names with commas and newlines', () => {
+  const csv = buildSessionsSummaryCsv([session({ session_name: 'fix a, then\nb' })]);
   assert.ok(csv.includes('"fix a, then\nb"'));
 });
 
-test('buildSessionTurnsCsv with no turns emits just the header', () => {
-  const csv = buildSessionTurnsCsv([]);
-  assert.equal(csv.slice(1), '#,time,query,model,input_tokens,cache_read_tokens,cache_creation_tokens,output_tokens,total_tokens,cost_usd\r\n');
+test('buildSessionsSummaryCsv leaves user empty for legacy rows without user', () => {
+  const csv = buildSessionsSummaryCsv([session({ username: null })]);
+  const lines = csv.slice(1).trimEnd().split('\r\n');
+  assert.equal(lines[1], '1,My session,,1500,40,1540,0.5,6');
+});
+
+test('buildSessionsSummaryCsv with no sessions emits just the header', () => {
+  const csv = buildSessionsSummaryCsv([]);
+  assert.equal(csv.slice(1), '#,session,user,context_tokens,output_tokens,total_tokens,cost_usd,turns\r\n');
 });

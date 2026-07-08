@@ -1,4 +1,4 @@
-// CSV building for token-usage session export.
+// CSV building for token-usage sessions summary export.
 // BOM so Excel detects UTF-8. Deliberately NO "sep=" hint line: when a file
 // starts with one, Excel ignores the BOM and decodes as ANSI, garbling
 // diacritics (reproduced via COM automation on Excel 16.0).
@@ -14,20 +14,18 @@ export function csvEscape(value) {
   return str;
 }
 
-const HEADER = ['#', 'time', 'query', 'model', 'input_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'output_tokens', 'total_tokens', 'cost_usd'];
+const HEADER = ['#', 'session', 'user', 'context_tokens', 'output_tokens', 'total_tokens', 'cost_usd', 'turns'];
 
-export function buildSessionTurnsCsv(turns) {
-  const lines = turns.map((turn, i) => [
+export function buildSessionsSummaryCsv(sessions) {
+  const lines = sessions.map((s, i) => [
     i + 1,
-    csvEscape(turn.created_at),
-    csvEscape(turn.query_text),
-    csvEscape(turn.model),
-    turn.input_tokens,
-    turn.cache_read_tokens,
-    turn.cache_creation_tokens,
-    turn.output_tokens,
-    turn.total_tokens,
-    turn.cost_usd,
+    csvEscape(s.session_name || s.first_query_text || s.session_id),
+    csvEscape(s.username),
+    s.total_context,
+    s.total_output,
+    s.total_tokens,
+    s.total_cost,
+    s.turn_count,
   ].join(','));
 
   return '\uFEFF' + [HEADER.join(','), ...lines].join('\r\n') + '\r\n';

@@ -67,9 +67,10 @@ test('getSessionTurns with userId hides sessions of other users', () => {
   assert.equal(foreign.items.length, 0);
 });
 
-test('getSessionTurns supports limit -1 (no limit) for export', () => {
-  const { items } = usageDb.getSessionTurns('s1', { limit: -1, offset: 0, userId: alice });
-  assert.equal(items.length, 2);
+test('getSessionsSummary supports limit -1 (no limit) for export', () => {
+  const { items, total } = usageDb.getSessionsSummary({ ...RANGE, limit: -1, offset: 0 });
+  assert.equal(total, 3);
+  assert.equal(items.length, 3);
 });
 
 test('getUsageUsers returns distinct users having usage rows, sorted by name', () => {

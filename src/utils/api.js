@@ -289,8 +289,17 @@ export const api = {
       return authenticatedFetch(`/api/usage-stats/sessions/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`);
     },
     users: () => authenticatedFetch('/api/usage-stats/users'),
-    exportSession: (sessionId) =>
-      authenticatedFetch(`/api/usage-stats/sessions/${encodeURIComponent(sessionId)}/export`),
+    exportSessions: ({ from, to, model, userId, sortBy, sortDir } = {}) => {
+      const params = new URLSearchParams();
+      if (from) params.append('from', from);
+      if (to) params.append('to', to);
+      if (model) params.append('model', model);
+      if (userId != null) params.append('userId', String(userId));
+      if (sortBy) params.append('sortBy', sortBy);
+      if (sortDir) params.append('sortDir', sortDir);
+      const qs = params.toString();
+      return authenticatedFetch(`/api/usage-stats/sessions/export${qs ? `?${qs}` : ''}`);
+    },
   },
 
   // Git Sync

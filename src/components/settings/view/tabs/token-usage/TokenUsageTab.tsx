@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Coins, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../../../../contexts/AuthContext';
@@ -141,17 +141,23 @@ export default function TokenUsageTab() {
     }
   };
 
-  const handleExport = async (e: MouseEvent, session: SessionSummary) => {
-    e.stopPropagation();
+  const handleExport = async () => {
     setExportError(null);
     try {
-      const res = await api.usageStats.exportSession(session.session_id);
+      const res = await api.usageStats.exportSessions({
+        from: dateRange.from,
+        to: dateRange.to,
+        model: modelFilter || undefined,
+        userId: userFilter || undefined,
+        sortBy,
+        sortDir,
+      });
       if (!res.ok) throw new Error(`Server error (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `token-usage-${session.session_id}.csv`;
+      a.download = 'token-usage-sessions.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -279,7 +285,7 @@ export default function TokenUsageTab() {
 
       {/* Table */}
       {!loading && !error && (
-        <>
+        <div className="space-y-3">
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
               <thead>
@@ -305,7 +311,6 @@ export default function TokenUsageTab() {
                       </span>
                     </th>
                   ))}
-                  <th className="w-10 px-3 py-2.5" />
                 </tr>
               </thead>
               <tbody>
@@ -350,21 +355,11 @@ export default function TokenUsageTab() {
                     <td className="px-3 py-2.5 text-right tabular-nums font-medium text-foreground">{formatTokens(s.total_tokens)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{formatCost(s.total_cost)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{s.turn_count}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      <button
-                        onClick={(e) => handleExport(e, s)}
-                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        title={t('tokenUsage.export')}
-                        aria-label={t('tokenUsage.export')}
-                      >
-                        <Download className="h-4 w-4" />
-                      </button>
-                    </td>
                   </tr>
                 ))}
                 {sessions.length === 0 && (
                   <tr>
-                    <td colSpan={canViewAll ? 9 : 8} className="px-3 py-12 text-center text-muted-foreground">
+                    <td colSpan={canViewAll ? 8 : 7} className="px-3 py-12 text-center text-muted-foreground">
                       {t('tokenUsage.noSessions')}
                     </td>
                   </tr>
@@ -373,17 +368,26 @@ export default function TokenUsageTab() {
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Export + pagination */}
           {total > 0 && (
-            <Pagination
-              page={page}
-              totalPages={totalPages}
-              perPage={perPage}
-              onPageChange={setPage}
-              onPerPageChange={setPerPage}
-            />
+            <>
+              <button
+                onClick={handleExport}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+              >
+                <Download className="h-4 w-4" />
+                {t('tokenUsage.export')}
+              </button>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                perPage={perPage}
+                onPageChange={setPage}
+                onPerPageChange={setPerPage}
+              />
+            </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

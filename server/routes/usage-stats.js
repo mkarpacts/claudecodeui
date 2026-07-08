@@ -1,7 +1,7 @@
 import express from 'express';
 import { usageDb, permissionsDb } from '../database/db.js';
 import { isAdmin } from '../middleware/auth.js';
-import { buildSessionTurnsCsv } from '../lib/usageCsv.js';
+import { buildSessionsSummaryCsv } from '../lib/usageCsv.js';
 
 const router = express.Router();
 
@@ -105,29 +105,33 @@ router.get('/users', (req, res) => {
 });
 
 /**
- * GET /api/usage-stats/sessions/:sessionId/export
- * Downloads all turns of a session (incl. query text) as CSV.
+ * GET /api/usage-stats/sessions/export
+ * Downloads the sessions summary (same filters as /sessions, no pagination) as CSV.
+ * Must stay registered before /sessions/:sessionId.
  */
-router.get('/sessions/:sessionId/export', (req, res) => {
+router.get('/sessions/export', (req, res) => {
   try {
-    const { sessionId } = req.params;
-    const scopeUserId = req.canViewAllUsage ? null : req.user.id;
+    const { from, to, model, sortBy = 'total_tokens', sortDir = 'desc' } = req.query;
+    const defaults = getDefaultDateRange();
 
-    // LIMIT -1 = no limit in SQLite — export always covers the whole session
-    const { items } = usageDb.getSessionTurns(sessionId, { limit: -1, offset: 0, userId: scopeUserId });
-
-    if (!items.length) {
-      // Unknown session, or a session that does not belong to this user
-      return res.status(404).json({ error: 'Session not found' });
-    }
+    // LIMIT -1 = no limit in SQLite — export always covers all filtered sessions
+    const { items } = usageDb.getSessionsSummary({
+      from: from || defaults.from,
+      to: to || defaults.to,
+      model: model || null,
+      userId: resolveUserScope(req),
+      sortBy,
+      sortDir,
+      limit: -1,
+      offset: 0,
+    });
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    const safeName = sessionId.replace(/[^\w.-]/g, '_');
-    res.setHeader('Content-Disposition', `attachment; filename="token-usage-${safeName}.csv"`);
-    res.send(buildSessionTurnsCsv(items));
+    res.setHeader('Content-Disposition', 'attachment; filename="token-usage-sessions.csv"');
+    res.send(buildSessionsSummaryCsv(items));
   } catch (error) {
-    console.error('Error exporting session:', error.message);
-    res.status(500).json({ error: 'Failed to export session' });
+    console.error('Error exporting usage sessions:', error.message);
+    res.status(500).json({ error: 'Failed to export usage sessions' });
   }
 });
 

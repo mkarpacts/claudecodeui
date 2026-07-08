@@ -567,7 +567,7 @@
       "all": "All users"
     },
     "export": "Download CSV",
-    "exportError": "Failed to export session",
+    "exportError": "Failed to export sessions",
     "summary": {
       "sessions": "Sessions",
       "totalTokens": "Total tokens",
