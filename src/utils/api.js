@@ -307,6 +307,7 @@ export const api = {
   // Git Sync
   gitSync: {
     status: () => authenticatedFetch('/api/git-sync/status'),
+    trigger: () => authenticatedFetch('/api/git-sync/trigger', { method: 'POST' }),
   },
 
   // Admin endpoints

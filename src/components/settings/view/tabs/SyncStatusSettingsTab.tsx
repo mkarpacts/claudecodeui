@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, FolderSync, Loader2, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, FolderSync, Loader2, RefreshCw, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../../../utils/api';
 
@@ -21,6 +21,7 @@ type SyncStatusData = {
   } | null;
   nextSyncIn: number | null;
   nextSyncAt: string | null;
+  running?: boolean;
   repos: RepoStatus[];
 };
 
@@ -78,23 +79,72 @@ export default function SyncStatusSettingsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const sawRunningRef = useRef(false);
+  const pollCountRef = useRef(0);
 
+  const loadStatus = useCallback(async (): Promise<SyncStatusData | null> => {
+    try {
+      const res = await api.gitSync.status();
+      if (!res.ok) throw new Error(`Server error (${res.status})`);
+      const json: SyncStatusData = await res.json();
+      setData(json);
+      setError(null);
+      return json;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('sync.loadError'));
+      return null;
+    }
+  }, [t]);
+
+  // Initial load; if a cycle is already running, enter the syncing state.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await api.gitSync.status();
-        if (!res.ok) throw new Error(`Server error (${res.status})`);
-        const json = await res.json();
-        if (!cancelled) setData(json);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : t('sync.loadError'));
-      } finally {
-        if (!cancelled) setLoading(false);
+      const json = await loadStatus();
+      if (!cancelled) {
+        if (json?.running) {
+          sawRunningRef.current = true;
+          setSyncing(true);
+        }
+        setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [t]);
+  }, [loadStatus]);
+
+  // Poll status every 4s while syncing; stop once the cycle has finished.
+  useEffect(() => {
+    if (!syncing) return;
+    const interval = setInterval(async () => {
+      const json = await loadStatus();
+      if (!json) return;
+      pollCountRef.current += 1;
+      if (json.running) {
+        sawRunningRef.current = true;
+      } else if (sawRunningRef.current || pollCountRef.current >= 3) {
+        setSyncing(false);
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [syncing, loadStatus]);
+
+  const handleSyncNow = async () => {
+    setTriggerError(null);
+    sawRunningRef.current = false;
+    pollCountRef.current = 0;
+    try {
+      const res = await api.gitSync.trigger();
+      if (res.status === 202 || res.status === 409) {
+        setSyncing(true);
+      } else {
+        setTriggerError(t('sync.triggerFailed'));
+      }
+    } catch {
+      setTriggerError(t('sync.triggerFailed'));
+    }
+  };
 
   const filteredRepos = useMemo(() => {
     if (!data?.repos) return [];
@@ -158,6 +208,29 @@ export default function SyncStatusSettingsTab() {
             {t('sync.nextSync')} {formatCountdown(data.nextSyncAt)}
           </div>
         )}
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-1.5 text-sm font-medium text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {syncing ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t('sync.syncing')}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                {t('sync.syncNow')}
+              </>
+            )}
+          </button>
+          {triggerError && (
+            <div className="mt-2 text-xs text-destructive">{triggerError}</div>
+          )}
+        </div>
       </div>
 
       {/* Search */}

@@ -543,7 +543,10 @@
     "loadError": "Failed to load sync status.",
     "repoCount": "{{count}} repositories",
     "ok": "OK",
-    "failed": "FAILED"
+    "failed": "FAILED",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "triggerFailed": "Could not start sync — sync service is unavailable."
   },
   "tokenUsage": {
     "title": "Token Usage",
