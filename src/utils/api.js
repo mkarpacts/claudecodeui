@@ -31,7 +31,9 @@ export const authenticatedFetch = (url, options = {}) => {
     // (expired JWT or rotated secret). Without a global signal every feature
     // fails with its own cryptic error (silent WS drops, "Failed to upload
     // files") — route them all to one re-login prompt instead.
-    if (response.status === 401 && !IS_PLATFORM && token) {
+    // Only if the rejected token is still the current one — a late 401 from a
+    // stale in-flight token must not wipe a freshly established session.
+    if (response.status === 401 && !IS_PLATFORM && token && token === localStorage.getItem('auth-token')) {
       window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
     }
     return response;
