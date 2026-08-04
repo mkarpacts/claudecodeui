@@ -8,6 +8,20 @@ export const readStoredToken = (): string | null => localStorage.getItem(AUTH_TO
 // the session is dead (expired JWT / rotated secret) and the user must re-login.
 export const AUTH_EXPIRED_EVENT = 'claude-ui:auth-session-expired';
 
+// Stale tokens can arrive from the outside — a leftover #auth_token in a
+// restored/history URL, or an X-Refreshed-Token header replayed from the HTTP
+// cache on a 304 — and persisting one would overwrite a live session's fresh
+// token. A genuine token is always freshly issued, so anything expired is
+// garbage. 60s of leeway covers client clock skew; the server stays the judge.
+export const isUsableToken = (token: string): boolean => {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return !payload.exp || payload.exp > Date.now() / 1000 - 60;
+  } catch {
+    return false;
+  }
+};
+
 export const AUTH_ERROR_MESSAGES = {
   authStatusCheckFailed: 'Failed to check authentication status',
   authFailed: 'Authentication failed. Please try again.',

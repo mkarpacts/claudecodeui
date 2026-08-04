@@ -199,6 +199,14 @@ const wss = new WebSocketServer({
 app.locals.wss = wss;
 
 app.use(cors({ exposedHeaders: ['X-Refreshed-Token'] }));
+
+// API responses must never be cached: a 304-revalidated cached response
+// replays stale headers (e.g. an old X-Refreshed-Token, which poisons the
+// client's stored token) and cached bodies fake a live session in the UI.
+app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+});
 app.use(express.json({
     limit: '50mb',
     type: (req) => {

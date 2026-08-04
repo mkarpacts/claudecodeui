@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { IS_PLATFORM } from '../../../constants/config';
 import { api } from '../../../utils/api';
-import { AUTH_ERROR_MESSAGES, AUTH_EXPIRED_EVENT, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY, readStoredToken } from '../constants';
+import { AUTH_ERROR_MESSAGES, AUTH_EXPIRED_EVENT, AUTH_FRAGMENT_ERRORS, AUTH_TOKEN_STORAGE_KEY, isUsableToken, readStoredToken } from '../constants';
 import type {
   AuthContextValue,
   AuthProviderProps,
@@ -44,7 +44,9 @@ function extractAuthFragment(): { token: string | null; error: string | null } {
 
   const error = errorCode ? (AUTH_FRAGMENT_ERRORS[errorCode] || AUTH_ERROR_MESSAGES.authFailed) : null;
 
-  return { token, error };
+  // The fragment is consumed (stripped from the URL) either way, but an
+  // expired token from a stale URL is dropped instead of persisted.
+  return { token: token && isUsableToken(token) ? token : null, error };
 }
 
 export function useAuth(): AuthContextValue {

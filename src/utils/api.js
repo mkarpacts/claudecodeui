@@ -1,5 +1,5 @@
 import { IS_PLATFORM } from "../constants/config";
-import { AUTH_EXPIRED_EVENT } from "../components/auth/constants";
+import { AUTH_EXPIRED_EVENT, isUsableToken } from "../components/auth/constants";
 
 // Utility function for authenticated API calls
 export const authenticatedFetch = (url, options = {}) => {
@@ -23,8 +23,10 @@ export const authenticatedFetch = (url, options = {}) => {
       ...options.headers,
     },
   }).then((response) => {
+    // A 304-revalidated response replays cached headers, so this can carry a
+    // long-expired token from an old cache entry — never store a dead one.
     const refreshedToken = response.headers.get('X-Refreshed-Token');
-    if (refreshedToken) {
+    if (refreshedToken && isUsableToken(refreshedToken)) {
       localStorage.setItem('auth-token', refreshedToken);
     }
     // A 401 on a request that carried a token means the session is dead
