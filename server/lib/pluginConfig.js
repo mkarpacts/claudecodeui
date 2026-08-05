@@ -12,3 +12,17 @@ export function pluginConfigsFromEnv(env) {
 export function pluginCommandDirs(env) {
   return pluginPathsFromEnv(env).map((p) => path.posix.join(p, 'commands'));
 }
+
+export function isPluginCommandPath(commandPath, env) {
+  if (!commandPath) return false;
+
+  const resolvedPath = path.resolve(commandPath);
+
+  return pluginCommandDirs(env).some((dir) => {
+    const relativePath = path.relative(path.resolve(dir), resolvedPath);
+    return relativePath !== '' &&
+      relativePath !== '..' &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath);
+  });
+}

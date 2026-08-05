@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../shared/modelConstants.js';
 import { parseFrontmatter } from '../utils/frontmatter.js';
-import { pluginCommandDirs } from '../lib/pluginConfig.js';
+import { isPluginCommandPath, pluginCommandDirs } from '../lib/pluginConfig.js';
 import { skillsCache } from '../lib/skillsCache.js';
 import { currentSkillsVersion } from '../lib/skillsVersion.js';
 import { buildSkillEntries, dedupeByName } from '../lib/commandListBuilder.js';
@@ -569,10 +569,14 @@ router.post('/execute', async (req, res) => {
         const rel = path.relative(base, resolvedPath);
         return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
       };
-      if (!(isUnder(userBase) || (projectBase && isUnder(projectBase)))) {
+      const isPluginCommand = isPluginCommandPath(
+        resolvedPath,
+        process.env.CLAUDE_PLUGINS
+      );
+      if (!(isUnder(userBase) || (projectBase && isUnder(projectBase)) || isPluginCommand)) {
         return res.status(403).json({
           error: 'Access denied',
-          message: 'Command must be in .claude/commands directory'
+          message: 'Command must be in an allowed command directory'
         });
       }
     }
