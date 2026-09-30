@@ -11,6 +11,10 @@
     "copyAsMarkdown": "Markdownとしてコピー",
     "copyAsText": "テキストとしてコピー"
   },
+  "userMessage": {
+    "showMore": "もっと見る",
+    "showLess": "折りたたむ"
+  },
   "messageTypes": {
     "user": "U",
     "error": "エラー",

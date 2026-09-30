@@ -11,6 +11,10 @@
     "copyAsMarkdown": "Копировать как Markdown",
     "copyAsText": "Копировать как текст"
   },
+  "userMessage": {
+    "showMore": "Показать больше",
+    "showLess": "Свернуть"
+  },
   "messageTypes": {
     "user": "П",
     "error": "Ошибка",

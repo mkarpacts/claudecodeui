@@ -11,6 +11,10 @@
     "copyAsMarkdown": "Copy as markdown",
     "copyAsText": "Copy as text"
   },
+  "userMessage": {
+    "showMore": "Show more",
+    "showLess": "Show less"
+  },
   "messageTypes": {
     "user": "U",
     "error": "Error",

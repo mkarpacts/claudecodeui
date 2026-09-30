@@ -11,6 +11,10 @@
     "copyAsMarkdown": "Als Markdown kopieren",
     "copyAsText": "Als Text kopieren"
   },
+  "userMessage": {
+    "showMore": "Mehr anzeigen",
+    "showLess": "Weniger anzeigen"
+  },
   "messageTypes": {
     "user": "Benutzer:in",
     "error": "Fehler",

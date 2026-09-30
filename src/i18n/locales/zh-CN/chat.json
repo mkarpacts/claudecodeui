@@ -11,6 +11,10 @@
     "copyAsMarkdown": "复制为 Markdown",
     "copyAsText": "复制为纯文本"
   },
+  "userMessage": {
+    "showMore": "显示更多",
+    "showLess": "收起"
+  },
   "messageTypes": {
     "user": "U",
     "error": "错误",

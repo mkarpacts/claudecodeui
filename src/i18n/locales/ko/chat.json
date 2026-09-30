@@ -11,6 +11,10 @@
     "copyAsMarkdown": "마크다운으로 복사",
     "copyAsText": "텍스트로 복사"
   },
+  "userMessage": {
+    "showMore": "더 보기",
+    "showLess": "접기"
+  },
   "messageTypes": {
     "user": "U",
     "error": "오류",
