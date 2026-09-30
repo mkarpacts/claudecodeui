@@ -67,6 +67,7 @@ function ChatInterface({
     setCursorModel,
     claudeModel,
     setClaudeModel,
+    claudeModelOptions,
     codexModel,
     setCodexModel,
     geminiModel,
@@ -311,6 +312,7 @@ function ChatInterface({
           textareaRef={textareaRef}
           claudeModel={claudeModel}
           setClaudeModel={setClaudeModel}
+          claudeModelOptions={claudeModelOptions}
           cursorModel={cursorModel}
           setCursorModel={setCursorModel}
           codexModel={codexModel}

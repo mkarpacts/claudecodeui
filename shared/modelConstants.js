@@ -11,17 +11,30 @@
  * - API format ('claude-sonnet-4.5') - used by slash commands for display
  */
 export const CLAUDE_MODELS = {
-  // Models in SDK format (what the actual SDK accepts)
   OPTIONS: [
-    { value: "sonnet", label: "Sonnet" },
-    { value: "opus", label: "Opus" },
-    { value: "haiku", label: "Haiku" },
-    { value: "opusplan", label: "Opus Plan" },
-    { value: "sonnet[1m]", label: "Sonnet [1M]" },
+    { value: "default", label: "Default (recommended)", description: "Whatever the CLI currently defaults to" },
+    { value: "opus", label: "Opus 5.5", description: "For complex work and everyday tasks" },
+    { value: "claude-fable-5-1", label: "Fable 5.1", description: "For your toughest challenges" },
+    { value: "sonnet", label: "Sonnet 5.5", description: "Most efficient for simpler tasks" },
+    { value: "haiku", label: "Haiku 4.5", description: "Fastest for quick answers" },
+    { value: "opusplan", label: "Opus Plan Mode", description: "Use Opus in plan mode, Sonnet otherwise", alwaysOffer: true },
   ],
 
   DEFAULT: "sonnet",
 };
+
+/**
+ * @param {Array<{value: string, label?: string, displayName?: string, description?: string, resolvedModel?: string}>} options
+ * @returns {Array<{value: string, label: string, description: string|null, resolvedModel: string|null}>}
+ */
+export function toModelOptions(options) {
+  return options.map((m) => ({
+    value: m.value,
+    label: m.displayName || m.label || m.value,
+    description: m.description || null,
+    resolvedModel: m.resolvedModel || null,
+  }));
+}
 
 /**
  * Cursor Models

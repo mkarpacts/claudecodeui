@@ -116,3 +116,10 @@ export interface ChatInterfaceProps {
   onTaskClick?: (...args: unknown[]) => void;
   onShowAllTasks?: (() => void) | null;
 }
+
+export interface TokenBudget {
+  used?: number;
+  total?: number;
+  contextUsed?: number;
+  contextTotal?: number;
+}

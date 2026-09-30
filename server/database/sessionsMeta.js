@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions_meta (
   updated_at    TEXT NOT NULL,
   superseded_by TEXT NULL,
   deleted_at    TEXT NULL,
+  context_window INTEGER NULL,
   PRIMARY KEY (session_id, provider)
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_meta_project_activity
@@ -35,6 +36,13 @@ export function migrateSessionsMetaSoftDelete(db) {
   const cols = db.prepare('PRAGMA table_info(sessions_meta)').all().map(c => c.name);
   if (!cols.includes('deleted_at')) {
     db.exec('ALTER TABLE sessions_meta ADD COLUMN deleted_at TEXT NULL');
+  }
+}
+
+export function migrateSessionsMetaContextWindow(db) {
+  const cols = db.prepare('PRAGMA table_info(sessions_meta)').all().map(c => c.name);
+  if (!cols.includes('context_window')) {
+    db.exec('ALTER TABLE sessions_meta ADD COLUMN context_window INTEGER NULL');
   }
 }
 
@@ -96,6 +104,10 @@ export function createSessionsMetaDb(db) {
   const latestCwdForProjectStmt = db.prepare(
     'SELECT cwd FROM sessions_meta WHERE project = ? AND cwd IS NOT NULL ORDER BY last_activity DESC, session_id DESC LIMIT 1');
   const allIdsStmt = db.prepare('SELECT session_id FROM sessions_meta WHERE provider = ?');
+  const setContextWindowStmt = db.prepare(
+    'UPDATE sessions_meta SET context_window = ? WHERE session_id = ? AND provider = ?');
+  const getContextWindowStmt = db.prepare(
+    'SELECT context_window FROM sessions_meta WHERE session_id = ? AND provider = ?');
   // Soft delete only (decision 2026-07-03): nothing is ever DELETEd from the DB —
   // rows plus their ownership/name records stay forever for statistics.
   const softDeleteStmt = db.prepare(
@@ -138,6 +150,12 @@ export function createSessionsMetaDb(db) {
         hasMore,
         nextCursor: hasMore && last ? { lastActivity: last.last_activity, sessionId: last.session_id } : null,
       };
+    },
+    setContextWindow(sessionId, contextWindow, provider = 'claude') {
+      return setContextWindowStmt.run(contextWindow, sessionId, provider);
+    },
+    getContextWindow(sessionId, provider = 'claude') {
+      return getContextWindowStmt.get(sessionId, provider)?.context_window ?? null;
     },
     allSessionIds(provider = 'claude') { return new Set(allIdsStmt.all(provider).map(r => r.session_id)); },
     softDelete(sessionId, provider = 'claude', now = nowIso()) { softDeleteStmt.run(now, now, sessionId, provider); },

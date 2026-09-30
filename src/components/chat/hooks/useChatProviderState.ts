@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authenticatedFetch } from '../../../utils/api';
-import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
+import { CLAUDE_MODELS, CODEX_MODELS, CURSOR_MODELS, GEMINI_MODELS, toModelOptions } from '../../../../shared/modelConstants';
 import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type { ProjectSession, SessionProvider } from '../../../types/app';
 
 interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
+}
+
+export interface ClaudeModelOption {
+  value: string;
+  label: string;
+  description?: string | null;
+  resolvedModel?: string | null;
 }
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
@@ -27,7 +34,46 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
   });
 
+  const [claudeModelOptions, setClaudeModelOptions] = useState<ClaudeModelOption[]>(
+    () => toModelOptions(CLAUDE_MODELS.OPTIONS),
+  );
+
   const lastProviderRef = useRef(provider);
+
+  const claudeModelRef = useRef(claudeModel);
+  claudeModelRef.current = claudeModel;
+
+  useEffect(() => {
+    if (provider !== 'claude') {
+      return;
+    }
+
+    authenticatedFetch('/api/models/claude')
+      .then((response) => response.json())
+      .then((data) => {
+        const options: ClaudeModelOption[] = Array.isArray(data?.models) ? data.models : [];
+        if (options.length === 0) return;
+
+        setClaudeModelOptions(options);
+
+        if (data?.source !== 'sdk') return;
+
+        const current = claudeModelRef.current;
+        const known = options.some(
+          (o) => o.value === current || o.resolvedModel === current,
+        );
+        if (known) return;
+
+        const replacement = options.some((o) => o.value === CLAUDE_MODELS.DEFAULT)
+          ? CLAUDE_MODELS.DEFAULT
+          : options[0].value;
+        localStorage.setItem('claude-model', replacement);
+        setClaudeModel(replacement);
+      })
+      .catch((error) => {
+        console.error('Error loading Claude model list:', error);
+      });
+  }, [provider]);
 
   useEffect(() => {
     if (!selectedSession?.id) {
@@ -106,6 +152,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setCursorModel,
     claudeModel,
     setClaudeModel,
+    claudeModelOptions,
     codexModel,
     setCodexModel,
     geminiModel,

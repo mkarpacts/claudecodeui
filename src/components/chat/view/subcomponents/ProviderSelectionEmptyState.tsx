@@ -1,15 +1,18 @@
 import React from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import SessionProviderLogo from "../../../llm-logo-provider/SessionProviderLogo";
+import type { ClaudeModelOption } from "../../hooks/useChatProviderState";
 import {
   CLAUDE_MODELS,
   CURSOR_MODELS,
   CODEX_MODELS,
   GEMINI_MODELS,
+  toModelOptions,
 } from "../../../../../shared/modelConstants";
 import type { ProjectSession, SessionProvider } from "../../../../types/app";
 import { NextTaskBanner } from "../../../task-master";
+import ModelPicker from "./ModelPicker";
 
 type ProviderSelectionEmptyStateProps = {
   selectedSession: ProjectSession | null;
@@ -19,6 +22,7 @@ type ProviderSelectionEmptyStateProps = {
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   claudeModel: string;
   setClaudeModel: (model: string) => void;
+  claudeModelOptions: ClaudeModelOption[];
   cursorModel: string;
   setCursorModel: (model: string) => void;
   codexModel: string;
@@ -103,6 +107,7 @@ export default function ProviderSelectionEmptyState({
   textareaRef,
   claudeModel,
   setClaudeModel,
+  claudeModelOptions,
   cursorModel,
   setCursorModel,
   codexModel,
@@ -142,6 +147,10 @@ export default function ProviderSelectionEmptyState({
   };
 
   const modelConfig = getModelConfig(provider);
+  const modelOptions =
+    provider === "claude"
+      ? claudeModelOptions
+      : toModelOptions(modelConfig.OPTIONS);
   const currentModel = getModelValue(
     provider,
     claudeModel,
@@ -217,23 +226,11 @@ export default function ProviderSelectionEmptyState({
               <span className="text-sm text-muted-foreground">
                 {t("providerSelection.selectModel")}
               </span>
-              <div className="relative">
-                <select
-                  value={currentModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  tabIndex={-1}
-                  className="cursor-pointer appearance-none rounded-lg border border-border/60 bg-muted/50 py-1.5 pl-3 pr-7 text-sm font-medium text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  {modelConfig.OPTIONS.map(
-                    ({ value, label }: { value: string; label: string }) => (
-                      <option key={value + label} value={value}>
-                        {label}
-                      </option>
-                    ),
-                  )}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-              </div>
+              <ModelPicker
+                value={currentModel}
+                options={modelOptions}
+                onChange={handleModelChange}
+              />
             </div>
 
             <p className="text-center text-sm text-muted-foreground/70">

@@ -39,6 +39,7 @@ import os from 'os';
 import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
+import { contextUsageFromEntries, legacyTokenBudgetFromEntries, parseTranscript, resolveContextWindow, setContextWindowStore } from './lib/contextUsage.js';
 import { spawn } from 'child_process';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
@@ -66,6 +67,7 @@ import userRoutes from './routes/user.js';
 import codexRoutes from './routes/codex.js';
 import geminiRoutes from './routes/gemini.js';
 import pluginsRoutes from './routes/plugins.js';
+import modelsRoutes from './routes/models.js';
 import messagesRoutes from './routes/messages.js';
 import usageRoutes from './routes/usage.js';
 import gitSyncRoutes from './routes/git-sync.js';
@@ -74,6 +76,11 @@ import adminRoutes from './routes/admin.js';
 import { createNormalizedMessage } from './providers/types.js';
 import { startEnabledPluginServers, stopAllPlugins, getPluginPort } from './utils/plugin-process-manager.js';
 import { initializeDatabase, sessionNamesDb, applyCustomSessionNames, sessionOwnershipDb, sessionsMetaDb } from './database/db.js';
+
+setContextWindowStore({
+    get: (sessionId) => sessionsMetaDb.getContextWindow(sessionId),
+    set: (sessionId, contextWindow) => sessionsMetaDb.setContextWindow(sessionId, contextWindow),
+});
 import { repairSessionsMeta } from './services/sessionsRepair.js';
 import { backfillSessionsMeta } from './services/sessionsBackfill.js';
 import { processAttachment } from './services/attachments/index.js';
@@ -277,6 +284,8 @@ app.use('/api/gemini', authenticateToken, geminiRoutes);
 
 // Plugins API Routes (protected)
 app.use('/api/plugins', authenticateToken, pluginsRoutes);
+
+app.use('/api/models', authenticateToken, modelsRoutes);
 
 // Usage data route (protected)
 app.use('/api/usage', authenticateToken, usageRoutes);
@@ -2333,47 +2342,16 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
             }
             throw error; // Re-throw other errors to be caught by outer try-catch
         }
-        const lines = fileContent.trim().split('\n');
-
-        const parsedContextWindow = parseInt(process.env.CONTEXT_WINDOW, 10);
-        const contextWindow = Number.isFinite(parsedContextWindow) ? parsedContextWindow : 160000;
-        let inputTokens = 0;
-        let cacheCreationTokens = 0;
-        let cacheReadTokens = 0;
-
-        // Find the latest assistant message with usage data (scan from end)
-        for (let i = lines.length - 1; i >= 0; i--) {
-            try {
-                const entry = JSON.parse(lines[i]);
-
-                // Only count assistant messages which have usage data
-                if (entry.type === 'assistant' && entry.message?.usage) {
-                    const usage = entry.message.usage;
-
-                    // Use token counts from latest assistant message only
-                    inputTokens = usage.input_tokens || 0;
-                    cacheCreationTokens = usage.cache_creation_input_tokens || 0;
-                    cacheReadTokens = usage.cache_read_input_tokens || 0;
-
-                    break; // Stop after finding the latest assistant message
-                }
-            } catch (parseError) {
-                // Skip lines that can't be parsed
-                continue;
-            }
-        }
-
-        // Calculate total context usage (excluding output_tokens, as per ccusage)
-        const totalUsed = inputTokens + cacheCreationTokens + cacheReadTokens;
+        const entries = parseTranscript(fileContent);
+        const legacy = legacyTokenBudgetFromEntries(entries);
+        const context = contextUsageFromEntries(entries);
 
         res.json({
-            used: totalUsed,
-            total: contextWindow,
-            breakdown: {
-                input: inputTokens,
-                cacheCreation: cacheCreationTokens,
-                cacheRead: cacheReadTokens
-            }
+            used: legacy.used,
+            total: legacy.total,
+            breakdown: legacy.breakdown,
+            contextUsed: context.used,
+            contextTotal: resolveContextWindow({ sessionId: safeSessionId, modelKey: context.modelKey })
         });
     } catch (error) {
         console.error('Error reading session token usage:', error);

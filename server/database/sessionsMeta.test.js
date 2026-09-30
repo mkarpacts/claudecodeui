@@ -2,7 +2,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { SESSIONS_META_SCHEMA, SESSION_OWNERSHIP_INDEX_SQL, createSessionsMetaDb, encodeProjectName, migrateSessionsMetaSoftDelete } from './sessionsMeta.js';
+import { SESSIONS_META_SCHEMA, SESSION_OWNERSHIP_INDEX_SQL, createSessionsMetaDb, encodeProjectName, migrateSessionsMetaSoftDelete, migrateSessionsMetaContextWindow } from './sessionsMeta.js';
 
 function makeDb() {
   const db = new Database(':memory:');
@@ -141,10 +141,16 @@ test('migrateSessionsMetaSoftDelete adds deleted_at to pre-existing tables, idem
     CREATE TABLE session_names (id INTEGER PRIMARY KEY, session_id TEXT, provider TEXT DEFAULT 'claude', custom_name TEXT, UNIQUE(session_id, provider));`);
   migrateSessionsMetaSoftDelete(old);
   migrateSessionsMetaSoftDelete(old); // idempotent
-  const migrated = createSessionsMetaDb(old); // prepared statements referencing deleted_at must not throw
+  migrateSessionsMetaContextWindow(old);
+  migrateSessionsMetaContextWindow(old);
+  const migrated = createSessionsMetaDb(old);
   migrated.upsertCreated({ sessionId: 'a', project: 'p', filePath: '/x/a.jsonl', now: '2026-07-01T10:00:00.000Z' });
   migrated.softDelete('a');
   assert.notEqual(migrated.getById('a').deleted_at, null);
+
+  assert.equal(migrated.getContextWindow('a'), null);
+  migrated.setContextWindow('a', 1000000);
+  assert.equal(migrated.getContextWindow('a'), 1000000);
 });
 
 test('softDeleteProject hides all project sessions, leaves other projects intact', () => {

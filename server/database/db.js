@@ -4,7 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { SESSIONS_META_SCHEMA, SESSION_OWNERSHIP_INDEX_SQL, createSessionsMetaDb, migrateSessionsMetaSoftDelete } from './sessionsMeta.js';
+import { SESSIONS_META_SCHEMA, SESSION_OWNERSHIP_INDEX_SQL, createSessionsMetaDb, migrateSessionsMetaSoftDelete, migrateSessionsMetaContextWindow } from './sessionsMeta.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -105,6 +105,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS session_names (
 )`);
 db.exec(SESSIONS_META_SCHEMA);
 migrateSessionsMetaSoftDelete(db); // adds deleted_at to tables created before 2026-07-03
+migrateSessionsMetaContextWindow(db);
 
 // Show app installation path prominently
 const appInstallPath = path.join(__dirname, '../..');

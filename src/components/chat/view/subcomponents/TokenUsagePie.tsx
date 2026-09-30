@@ -13,15 +13,17 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percentage / 100) * circumference;
 
-  // Color based on usage level
   const getColor = () => {
-    if (percentage < 50) return '#3b82f6'; // blue
-    if (percentage < 75) return '#f59e0b'; // orange
-    return '#ef4444'; // red
+    if (percentage <= 25) return '#22c55e';
+    if (percentage <= 50) return '#eab308';
+    if (percentage <= 75) return '#f59e0b';
+    return '#ef4444';
   };
 
+  const tooltip = `Kapacita konverzace: ${used.toLocaleString('cs-CZ')} / ${total.toLocaleString('cs-CZ')}`;
+
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+    <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400" title={tooltip}>
       <svg width="24" height="24" viewBox="0 0 24 24" className="-rotate-90 transform">
         {/* Background circle */}
         <circle
@@ -46,9 +48,7 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
           strokeLinecap="round"
         />
       </svg>
-      <span title={`${used.toLocaleString()} / ${total.toLocaleString()} tokens`}>
-        {percentage.toFixed(1)}%
-      </span>
+      <span>{percentage.toFixed(1)}%</span>
     </div>
   );
 }

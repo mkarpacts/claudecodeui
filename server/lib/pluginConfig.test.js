@@ -36,7 +36,7 @@ test('isPluginCommandPath: allows commands under configured plugin command direc
 
   assert.equal(
     isPluginCommandPath(
-      path.join(bughunterRoot, 'commands', 'cts-bughunter-linux.md'),
+      path.join(bughunterRoot, 'commands', 'cts-bughunter.md'),
       env,
     ),
     true,
@@ -49,7 +49,7 @@ test('isPluginCommandPath: rejects paths outside configured plugin command direc
 
   assert.equal(isPluginCommandPath(path.join(pluginRoot, 'scripts', 'run.js'), pluginRoot), false);
   assert.equal(
-    isPluginCommandPath(path.join(siblingRoot, 'commands', 'cts-bughunter-linux.md'), pluginRoot),
+    isPluginCommandPath(path.join(siblingRoot, 'commands', 'cts-bughunter.md'), pluginRoot),
     false,
   );
   assert.equal(isPluginCommandPath(path.join(pluginRoot, 'commands'), pluginRoot), false);

@@ -57,7 +57,7 @@ interface UseChatRealtimeHandlersArgs {
   setIsLoading: (loading: boolean) => void;
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
-  setTokenBudget: (budget: Record<string, unknown> | null) => void;
+  setTokenBudget: Dispatch<SetStateAction<Record<string, unknown> | null>>;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
   streamBufferRef: MutableRefObject<string>;
@@ -341,7 +341,11 @@ export function useChatRealtimeHandlers({
 
       case 'status': {
         if (msg.text === 'token_budget' && msg.tokenBudget) {
-          setTokenBudget(msg.tokenBudget as Record<string, unknown>);
+          if (msg.sessionId && activeViewSessionId && msg.sessionId !== activeViewSessionId) break;
+          setTokenBudget((previous) => ({
+            ...(previous || {}),
+            ...(msg.tokenBudget as Record<string, unknown>),
+          }));
         } else if (msg.text) {
           setClaudeStatus({
             text: msg.text,

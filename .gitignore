@@ -139,3 +139,7 @@ tasks/
 
 # Git worktrees
 .worktrees/
+
+# SQLite write-ahead-log artifacts of a running server
+*.db-shm
+*.db-wal

@@ -19,6 +19,13 @@ import path from 'path';
 import os from 'os';
 import { CLAUDE_MODELS } from '../shared/modelConstants.js';
 import {
+  createLiveContextTracker,
+  fallbackContextWindow,
+  rememberContextWindow,
+  resolveContextWindow,
+  resolveModelKey
+} from './lib/contextUsage.js';
+import {
   createNotificationEvent,
   notifyRunFailed,
   notifyRunStopped,
@@ -32,8 +39,46 @@ import { encodeProjectName, sessionFilePath } from './database/sessionsMeta.js';
 import { broadcastToUser } from './lib/wsHub.js';
 import { pluginConfigsFromEnv } from './lib/pluginConfig.js';
 import { skillsCache } from './lib/skillsCache.js';
+import { modelsCache } from './lib/modelsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
 import { reattachUserSessions } from './lib/reattachSessions.js';
+
+let modelsProbeInFlight = null;
+let modelsRefreshInFlight = false;
+let modelsProbeFailedAt = 0;
+const MODEL_PROBE_FAILURE_COOLDOWN_MS = 60000;
+const MODEL_PROBE_TIMEOUT_MS = 20000;
+
+/**
+ * @param {Object} queryInstance
+ * @param {string} logPrefix
+ * @returns {Promise<Array|null>}
+ */
+async function cacheSupportedModels(queryInstance, logPrefix) {
+  let timer = null;
+  try {
+    if (typeof queryInstance.supportedModels !== 'function') return null;
+
+    const models = await Promise.race([
+      queryInstance.supportedModels(),
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out after ${MODEL_PROBE_TIMEOUT_MS}ms`)),
+          MODEL_PROBE_TIMEOUT_MS
+        );
+      })
+    ]);
+
+    modelsCache.set(models);
+    console.log(`${logPrefix} Cached ${models?.length ?? 0} runtime models`);
+    return models;
+  } catch (e) {
+    console.warn(`${logPrefix} supportedModels() failed:`, e?.message || e);
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -324,43 +369,39 @@ function transformMessage(sdkMessage) {
 }
 
 /**
- * Extracts token usage from SDK result messages
  * @param {Object} resultMessage - SDK result message
+ * @param {{used: number|null, model: string|null}} liveContext
+ * @param {string|null} sessionId
  * @returns {Object|null} Token budget object or null
  */
-function extractTokenBudget(resultMessage) {
-  if (resultMessage.type !== 'result' || !resultMessage.modelUsage) {
+function extractTokenBudget(resultMessage, liveContext, sessionId) {
+  if (resultMessage.type !== 'result') {
     return null;
   }
 
-  // Get the first model's usage data
-  const modelKey = Object.keys(resultMessage.modelUsage)[0];
-  const modelData = resultMessage.modelUsage[modelKey];
+  const payload = {};
 
-  if (!modelData) {
-    return null;
+  if (resultMessage.modelUsage) {
+    const spendKey = Object.keys(resultMessage.modelUsage)[0];
+    const spend = resultMessage.modelUsage[spendKey];
+    if (spend) {
+      payload.used = (spend.inputTokens || 0)
+        + (spend.outputTokens || 0)
+        + (spend.cacheReadInputTokens || 0)
+        + (spend.cacheCreationInputTokens || 0);
+      payload.total = fallbackContextWindow();
+    }
   }
 
-  // Use cumulative tokens if available (tracks total for the session)
-  // Otherwise fall back to per-request tokens
-  const inputTokens = modelData.cumulativeInputTokens || modelData.inputTokens || 0;
-  const outputTokens = modelData.cumulativeOutputTokens || modelData.outputTokens || 0;
-  const cacheReadTokens = modelData.cumulativeCacheReadInputTokens || modelData.cacheReadInputTokens || 0;
-  const cacheCreationTokens = modelData.cumulativeCacheCreationInputTokens || modelData.cacheCreationInputTokens || 0;
+  const modelKey = resolveModelKey(resultMessage.modelUsage, liveContext.model);
+  rememberContextWindow(sessionId, resultMessage.modelUsage?.[modelKey]?.contextWindow);
 
-  // Total used = input + output + cache tokens
-  const totalUsed = inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+  if (liveContext.used !== null) {
+    payload.contextUsed = liveContext.used;
+    payload.contextTotal = resolveContextWindow({ sessionId, modelKey });
+  }
 
-  // Use configured context window budget from environment (default 160000)
-  // This is the user's budget limit, not the model's context window
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW) || 160000;
-
-  // Token calc logged via token-budget WS event
-
-  return {
-    used: totalUsed,
-    total: contextWindow
-  };
+  return Object.keys(payload).length > 0 ? payload : null;
 }
 
 const SAFE_EXTENSIONS = new Set([
@@ -745,6 +786,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
       }
     })();
 
+    if (modelsCache.needsRefresh() && !modelsRefreshInFlight) {
+      modelsRefreshInFlight = true;
+      cacheSupportedModels(queryInstance, logPrefix).finally(() => {
+        modelsRefreshInFlight = false;
+      });
+    }
+
     console.log(`${logPrefix} Query instance created (${Date.now() - queryCreateStart}ms)`);
 
     // Restore immediately — Query constructor already captured the value
@@ -806,8 +854,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
       });
     };
 
+    const liveContext = createLiveContextTracker();
+
     // Process the first message that we already received
     const processMessage = (message) => {
+      liveContext.observe(message);
+
       if (message.session_id && !capturedSessionId) {
         capturedSessionId = message.session_id;
         console.log(`${logPrefix} Session ID captured: ${capturedSessionId} (${Date.now() - queryStartTime}ms)`);
@@ -909,7 +961,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
           console.warn('[SESSION] Failed to update sessions_meta on result:', e.message);
         }
 
-        const tokenBudgetData = extractTokenBudget(message);
+        const tokenBudgetData = extractTokenBudget(message, liveContext, capturedSessionId || sessionId || null);
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
@@ -1076,8 +1128,41 @@ function reattachUserSessionWriters(userId, newRawWs) {
 }
 
 // Export public API
+/**
+ * @returns {Promise<Array|null>}
+ */
+async function ensureModelsCached() {
+  const cached = modelsCache.get();
+  if (cached) return cached;
+  if (modelsProbeInFlight) return modelsProbeInFlight;
+  if (Date.now() - modelsProbeFailedAt < MODEL_PROBE_FAILURE_COOLDOWN_MS) return null;
+
+  modelsProbeInFlight = (async () => {
+    let probe = null;
+    try {
+      async function* noUserMessage() {}
+      probe = query({ prompt: noUserMessage(), options: { cwd: os.homedir() } });
+      const models = await cacheSupportedModels(probe, '[SDK:MODELS]');
+      if (!models?.length) modelsProbeFailedAt = Date.now();
+      return models;
+    } catch (e) {
+      modelsProbeFailedAt = Date.now();
+      console.warn('[SDK:MODELS] Model probe could not start:', e?.message || e);
+      return null;
+    } finally {
+      try {
+        await probe?.close?.();
+      } catch { /* ignore */ }
+      modelsProbeInFlight = null;
+    }
+  })();
+
+  return modelsProbeInFlight;
+}
+
 export {
   queryClaudeSDK,
+  ensureModelsCached,
   abortClaudeSDKSession,
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
