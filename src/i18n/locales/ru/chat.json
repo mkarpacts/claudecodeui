@@ -132,6 +132,7 @@
     },
     "clickToChangeMode": "Нажмите для смены режима разрешений (или нажмите Tab в поле ввода)",
     "showAllCommands": "Показать все команды",
+    "sessionCost": "Стоимость сессии",
     "clearInput": "Очистить ввод",
     "scrollToBottom": "Прокрутить вниз"
   },

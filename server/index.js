@@ -40,6 +40,7 @@ import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
 import { contextUsageFromEntries, legacyTokenBudgetFromEntries, parseTranscript, resolveContextWindow, setContextWindowStore } from './lib/contextUsage.js';
+import { sessionCostFor, usageScopeFor } from './lib/usageScope.js';
 import { spawn } from 'child_process';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
@@ -2345,13 +2346,20 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
         const entries = parseTranscript(fileContent);
         const legacy = legacyTokenBudgetFromEntries(entries);
         const context = contextUsageFromEntries(entries);
+        let sessionCost = null;
+        try {
+            sessionCost = sessionCostFor(safeSessionId, usageScopeFor(req.user));
+        } catch (error) {
+            console.warn('Failed to read session cost:', error.message);
+        }
 
         res.json({
             used: legacy.used,
             total: legacy.total,
             breakdown: legacy.breakdown,
             contextUsed: context.used,
-            contextTotal: resolveContextWindow({ sessionId: safeSessionId, modelKey: context.modelKey })
+            contextTotal: resolveContextWindow({ sessionId: safeSessionId, modelKey: context.modelKey }),
+            sessionCost
         });
     } catch (error) {
         console.error('Error reading session token usage:', error);

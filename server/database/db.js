@@ -807,6 +807,15 @@ const usageDb = {
     `).get(...params);
   },
 
+  getSessionCost: (sessionId, { userId = null } = {}) => {
+    const userFilter = userId != null ? ' AND user_id = ?' : '';
+    const params = userId != null ? [sessionId, userId] : [sessionId];
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) AS total_cost FROM usage_log WHERE session_id = ?${userFilter}`
+    ).get(...params);
+    return row.total_cost;
+  },
+
   getSessionTurns: (sessionId, { limit = 10, offset = 0, userId = null } = {}) => {
     const userFilter = userId != null ? ' AND user_id = ?' : '';
     const params = userId != null ? [sessionId, userId] : [sessionId];

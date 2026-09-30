@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PermissionMode, Provider, TokenBudget } from '../../types/types';
+import SessionCost from './SessionCost';
 import ThinkingModeSelector from './ThinkingModeSelector';
 import TokenUsagePie from './TokenUsagePie';
 
@@ -100,6 +101,8 @@ export default function ChatInputControls({
           </span>
         )}
       </button>
+
+      {provider === 'claude' && <SessionCost cost={tokenBudget?.sessionCost} />}
 
       <TokenUsagePie
         used={tokenBudget?.contextUsed || 0}

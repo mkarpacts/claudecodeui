@@ -1,6 +1,6 @@
 import express from 'express';
-import { usageDb, permissionsDb } from '../database/db.js';
-import { isAdmin } from '../middleware/auth.js';
+import { usageDb } from '../database/db.js';
+import { canViewAllUsage } from '../lib/usageScope.js';
 import { buildSessionsSummaryCsv } from '../lib/usageCsv.js';
 
 const router = express.Router();
@@ -16,7 +16,7 @@ function getDefaultDateRange() {
 // Every authenticated user may access usage stats; non-privileged users
 // are restricted to their own sessions via resolveUserScope below.
 router.use((req, res, next) => {
-  req.canViewAllUsage = isAdmin(req.user) || permissionsDb.hasPermission(req.user.id, 'view_all_usage');
+  req.canViewAllUsage = canViewAllUsage(req.user);
   next();
 });
 

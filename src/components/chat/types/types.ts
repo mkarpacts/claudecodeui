@@ -122,4 +122,5 @@ export interface TokenBudget {
   total?: number;
   contextUsed?: number;
   contextTotal?: number;
+  sessionCost?: number | null;
 }

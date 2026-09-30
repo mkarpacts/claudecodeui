@@ -25,9 +25,14 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+const NO_COST = '\u2014';
+
+export function formatCostValue(n: number): string {
+  return n ? n.toFixed(4) : NO_COST;
+}
+
 export function formatCost(n: number): string {
-  if (!n) return '\u2014';
-  return `$${n.toFixed(4)}`;
+  return n ? `$${n.toFixed(4)}` : NO_COST;
 }
 
 export function formatDate(iso: string): string {

@@ -78,3 +78,26 @@ test('getUsageUsers returns distinct users having usage rows, sorted by name', (
   assert.deepEqual(users.map(u => u.username), ['alice', 'bob']);
   assert.ok(users.every(u => typeof u.id === 'number'));
 });
+
+test('getSessionCost sums the session cost the same way as getSessionsSummary', () => {
+  const { items } = usageDb.getSessionsSummary({ ...RANGE });
+  const s1 = items.find(i => i.session_id === 's1');
+  assert.equal(usageDb.getSessionCost('s1'), s1.total_cost);
+  assert.ok(Math.abs(usageDb.getSessionCost('s1') - 0.3) < 1e-9);
+});
+
+test('getSessionCost scopes to userId and returns 0 for unknown sessions', () => {
+  assert.ok(Math.abs(usageDb.getSessionCost('s1', { userId: alice }) - 0.3) < 1e-9);
+  assert.equal(usageDb.getSessionCost('s2', { userId: alice }), 0);
+  assert.equal(usageDb.getSessionCost('missing'), 0);
+});
+
+test('sessionCostFor fails closed without a user and scopes a regular user to own rows', async () => {
+  const { usageScopeFor, sessionCostFor } = await import('../lib/usageScope.js');
+  assert.equal(usageScopeFor(null), null);
+  assert.equal(sessionCostFor('s1', usageScopeFor(undefined)), null);
+  const aliceScope = usageScopeFor({ id: alice, email: 'alice@example.com' });
+  assert.deepEqual(aliceScope, { userId: alice });
+  assert.ok(Math.abs(sessionCostFor('s1', aliceScope) - 0.3) < 1e-9);
+  assert.equal(sessionCostFor('s2', aliceScope), 0);
+});

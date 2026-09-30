@@ -132,6 +132,7 @@
     },
     "clickToChangeMode": "Click to change permission mode (or press Tab in input)",
     "showAllCommands": "Show all commands",
+    "sessionCost": "Session cost",
     "clearInput": "Clear input",
     "scrollToBottom": "Scroll to bottom"
   },

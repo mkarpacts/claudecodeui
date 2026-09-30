@@ -33,7 +33,8 @@ import {
 } from './services/notification-orchestrator.js';
 import { claudeAdapter } from './providers/claude/adapter.js';
 import { createNormalizedMessage } from './providers/types.js';
-import { usageDb, sessionOwnershipDb, sessionsMetaDb, sessionNamesDb } from './database/db.js';
+import { usageDb, userDb, sessionOwnershipDb, sessionsMetaDb, sessionNamesDb } from './database/db.js';
+import { sessionCostFor, usageScopeFor } from './lib/usageScope.js';
 import { truncateTitle } from './services/sessionsLiveness.js';
 import { encodeProjectName, sessionFilePath } from './database/sessionsMeta.js';
 import { broadcastToUser } from './lib/wsHub.js';
@@ -855,6 +856,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
     };
 
     const liveContext = createLiveContextTracker();
+    let costScope = null;
+    try {
+      costScope = ws.userId ? usageScopeFor(userDb.getUserById(ws.userId)) : null;
+    } catch (e) {
+      console.warn('[USAGE] Failed to resolve usage scope:', e.message);
+    }
 
     // Process the first message that we already received
     const processMessage = (message) => {
@@ -962,6 +969,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
         }
 
         const tokenBudgetData = extractTokenBudget(message, liveContext, capturedSessionId || sessionId || null);
+        if (tokenBudgetData && sid && costScope) {
+          try {
+            tokenBudgetData.sessionCost = sessionCostFor(sid, costScope);
+          } catch (e) {
+            console.warn('[USAGE] Failed to read session cost:', e.message);
+          }
+        }
         if (tokenBudgetData) {
           ws.send(createNormalizedMessage({ kind: 'status', text: 'token_budget', tokenBudget: tokenBudgetData, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
         }
