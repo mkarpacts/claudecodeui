@@ -5,6 +5,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { spawn } from 'child_process';
+import { rejectUnloadableScope } from '../lib/mcpConfig.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -56,10 +57,10 @@ router.get('/cli/list', async (req, res) => {
 });
 
 // POST /api/mcp/cli/add - Add MCP server using Claude CLI
-router.post('/cli/add', async (req, res) => {
+router.post('/cli/add', rejectUnloadableScope, async (req, res) => {
   try {
     const { name, type = 'stdio', command, args = [], url, headers = {}, env = {}, scope = 'user', projectPath } = req.body;
-    
+
     console.log(`➕ Adding MCP server using Claude CLI (${scope} scope):`, name);
     
     const { spawn } = await import('child_process');
@@ -139,10 +140,10 @@ router.post('/cli/add', async (req, res) => {
 });
 
 // POST /api/mcp/cli/add-json - Add MCP server using JSON format
-router.post('/cli/add-json', async (req, res) => {
+router.post('/cli/add-json', rejectUnloadableScope, async (req, res) => {
   try {
     const { name, jsonConfig, scope = 'user', projectPath } = req.body;
-    
+
     console.log('➕ Adding MCP server using JSON format:', name);
     
     // Validate and parse JSON config

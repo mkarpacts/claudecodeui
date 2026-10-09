@@ -39,6 +39,7 @@ import { truncateTitle } from './services/sessionsLiveness.js';
 import { encodeProjectName, sessionFilePath } from './database/sessionsMeta.js';
 import { broadcastToUser } from './lib/wsHub.js';
 import { pluginConfigsFromEnv } from './lib/pluginConfig.js';
+import { applyMcpOptions, buildMcpServers } from './lib/mcpConfig.js';
 import { skillsCache } from './lib/skillsCache.js';
 import { modelsCache } from './lib/modelsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
@@ -556,60 +557,18 @@ async function cleanupTempFiles(tempPaths, tempDir) {
 }
 
 /**
- * Loads MCP server configurations from ~/.claude.json
+ * Authoritative MCP server list for a session: ~/.claude.json (minus any wiki bypass) + CLAUDE_MCP_SERVERS.
  * @param {string} cwd - Current working directory for project-specific configs
- * @returns {Object|null} MCP servers object or null if none found
+ * @returns {Object} MCP servers object (possibly empty)
  */
 async function loadMcpConfig(cwd) {
+  let userConfig = null;
   try {
-    const claudeConfigPath = path.join(os.homedir(), '.claude.json');
-
-    // Check if config file exists
-    try {
-      await fs.access(claudeConfigPath);
-    } catch (error) {
-      // File doesn't exist, return null
-      // No config file
-      return null;
-    }
-
-    // Read and parse config file
-    let claudeConfig;
-    try {
-      const configContent = await fs.readFile(claudeConfigPath, 'utf8');
-      claudeConfig = JSON.parse(configContent);
-    } catch (error) {
-      console.error('Failed to parse ~/.claude.json:', error.message);
-      return null;
-    }
-
-    // Extract MCP servers (merge global and project-specific)
-    let mcpServers = {};
-
-    // Add global MCP servers
-    if (claudeConfig.mcpServers && typeof claudeConfig.mcpServers === 'object') {
-      mcpServers = { ...claudeConfig.mcpServers };
-      // Global MCP servers loaded
-    }
-
-    // Add/override with project-specific MCP servers
-    if (claudeConfig.claudeProjects && cwd) {
-      const projectConfig = claudeConfig.claudeProjects[cwd];
-      if (projectConfig && projectConfig.mcpServers && typeof projectConfig.mcpServers === 'object') {
-        mcpServers = { ...mcpServers, ...projectConfig.mcpServers };
-        // Project MCP servers merged
-      }
-    }
-
-    // Return null if no servers found
-    if (Object.keys(mcpServers).length === 0) {
-      return null;
-    }
-    return mcpServers;
+    userConfig = JSON.parse(await fs.readFile(path.join(os.homedir(), '.claude.json'), 'utf8'));
   } catch (error) {
-    console.error('Error loading MCP config:', error.message);
-    return null;
+    if (error.code !== 'ENOENT') console.error('Failed to read ~/.claude.json:', error.message);
   }
+  return buildMcpServers({ userConfig, cwd, envRaw: process.env.CLAUDE_MCP_SERVERS });
 }
 
 /**
@@ -641,16 +600,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Map CLI options to SDK format
     const sdkOptions = mapCliOptionsToSDK(options);
 
-    // Load MCP configuration
+    // Load MCP configuration (authoritative list; strict so the CLI loads nothing else)
     const mcpLoadStart = Date.now();
     const mcpServers = await loadMcpConfig(options.cwd);
-    if (mcpServers) {
-      sdkOptions.mcpServers = mcpServers;
-      const mcpNames = Object.keys(mcpServers);
-      console.log(`${logPrefix} MCP servers loaded (${Date.now() - mcpLoadStart}ms): [${mcpNames.join(', ')}]`);
-    } else {
-      console.log(`${logPrefix} No MCP servers configured`);
-    }
+    applyMcpOptions(sdkOptions, mcpServers);
+    const mcpNames = Object.keys(mcpServers);
+    console.log(`${logPrefix} MCP servers loaded (${Date.now() - mcpLoadStart}ms): [${mcpNames.join(', ')}]`);
 
     // Handle attachments - save to temp files and modify prompt
     const attachmentResult = await handleAttachments(command, options.attachments);

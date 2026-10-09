@@ -1,4 +1,8 @@
 # Dependencies
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -143,3 +147,11 @@ tasks/
 # SQLite write-ahead-log artifacts of a running server
 *.db-shm
 *.db-wal
+
+# Project docs (local only)
+docs/
+
+# wiki-mcp sidecar tests (local only)
+scripts/wiki-mcp/tests/
+scripts/wiki-mcp/pytest.ini
+scripts/wiki-mcp/requirements-dev.txt
