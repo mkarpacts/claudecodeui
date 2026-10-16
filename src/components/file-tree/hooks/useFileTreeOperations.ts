@@ -9,6 +9,22 @@ import type { Project } from '../../../types/app';
 const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/;
 const RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 
+// Save a blob through a temporary anchor. Revoke later: revoking in the same tick
+// as click() can abort large downloads in Firefox/Safari.
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+
+  anchor.href = url;
+  anchor.download = filename;
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export type ToastMessage = {
   message: string;
   type: 'success' | 'error';
@@ -248,51 +264,17 @@ export function useFileTreeOperations({
     showToast(t('fileTree.toast.pathCopied', 'Path copied to clipboard'), 'success');
   }, [showToast, t]);
 
-  // Download file or folder
-  const handleDownload = useCallback(async (item: FileTreeNode) => {
-    if (!selectedProject) return;
-
-    setOperationLoading(true);
-    try {
-      if (item.type === 'directory') {
-        // Download folder as ZIP
-        await downloadFolderAsZip(item);
-      } else {
-        // Download single file
-        await downloadSingleFile(item);
-      }
-    } catch (err) {
-      showToast((err as Error).message, 'error');
-    } finally {
-      setOperationLoading(false);
-    }
-  }, [selectedProject, showToast]);
-
   // Download a single file
   const downloadSingleFile = useCallback(async (item: FileTreeNode) => {
     if (!selectedProject) return;
 
-    const response = await api.readFile(selectedProject.name, item.path);
+    const response = await api.readFileBinary(selectedProject.name, item.path);
 
     if (!response.ok) {
       throw new Error('Failed to download file');
     }
 
-    const data = await response.json();
-    const content = data.content;
-
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-
-    anchor.href = url;
-    anchor.download = item.name;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-
-    URL.revokeObjectURL(url);
+    saveBlob(await response.blob(), item.name);
   }, [selectedProject]);
 
   // Download folder as ZIP
@@ -300,6 +282,7 @@ export function useFileTreeOperations({
     if (!selectedProject) return;
 
     const zip = new JSZip();
+    const skipped: string[] = [];
 
     // Recursively get all files in the folder
     const collectFiles = async (node: FileTreeNode, currentPath: string) => {
@@ -307,10 +290,11 @@ export function useFileTreeOperations({
 
       if (node.type === 'file') {
         // Fetch file content
-        const response = await api.readFile(selectedProject.name, node.path);
+        const response = await api.readFileBinary(selectedProject.name, node.path);
         if (response.ok) {
-          const data = await response.json();
-          zip.file(fullPath, data.content);
+          zip.file(fullPath, await response.blob());
+        } else {
+          skipped.push(fullPath);
         }
       } else if (node.type === 'directory' && node.children) {
         // Recursively process children
@@ -329,20 +313,41 @@ export function useFileTreeOperations({
 
     // Generate ZIP file
     const zipBlob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(zipBlob);
-    const anchor = document.createElement('a');
+    saveBlob(zipBlob, `${folder.name}.zip`);
 
-    anchor.href = url;
-    anchor.download = `${folder.name}.zip`;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-
-    URL.revokeObjectURL(url);
-
-    showToast(t('fileTree.toast.folderDownloaded', 'Folder downloaded as ZIP'), 'success');
+    if (skipped.length > 0) {
+      showToast(
+        t('fileTree.toast.folderDownloadedPartial', {
+          defaultValue: 'Folder downloaded as ZIP, but {{count}} file(s) could not be read: {{files}}',
+          count: skipped.length,
+          files: skipped.join(', '),
+        }),
+        'error',
+      );
+    } else {
+      showToast(t('fileTree.toast.folderDownloaded', 'Folder downloaded as ZIP'), 'success');
+    }
   }, [selectedProject, showToast, t]);
+
+  // Download file or folder
+  const handleDownload = useCallback(async (item: FileTreeNode) => {
+    if (!selectedProject) return;
+
+    setOperationLoading(true);
+    try {
+      if (item.type === 'directory') {
+        // Download folder as ZIP
+        await downloadFolderAsZip(item);
+      } else {
+        // Download single file
+        await downloadSingleFile(item);
+      }
+    } catch (err) {
+      showToast((err as Error).message, 'error');
+    } finally {
+      setOperationLoading(false);
+    }
+  }, [selectedProject, showToast, downloadFolderAsZip, downloadSingleFile]);
 
   return {
     // Rename operations
