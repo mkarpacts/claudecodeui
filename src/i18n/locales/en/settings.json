@@ -157,7 +157,9 @@
     "resetsInHr": "Resets in {{h}} hr",
     "resetsInMin": "Resets in {{m}} min",
     "resetsOnDay": "Resets {{day}} {{time}}",
-    "loadError": "Failed to load usage data"
+    "loadError": "Failed to load usage data",
+    "showUsage": "Show plan usage",
+    "openFull": "Open full Usage"
   },
   "appearanceSettings": {
     "darkMode": {

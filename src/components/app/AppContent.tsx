@@ -37,7 +37,6 @@ export default function AppContent() {
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,
-    setShowSettings,
     openSettings,
     refreshProjectsSilently,
     sidebarSharedProps,
@@ -176,7 +175,7 @@ export default function AppContent() {
           processingSessions={processingSessions}
           onReplaceTemporarySession={replaceTemporarySession}
           onNavigateToSession={(targetSessionId: string) => navigate(`/session/${targetSessionId}`)}
-          onShowSettings={() => setShowSettings(true)}
+          onShowSettings={() => openSettings()}
         />
       </div>
 

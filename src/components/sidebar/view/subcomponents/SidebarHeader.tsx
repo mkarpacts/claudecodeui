@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import { Button, Input } from '../../../../shared/view/ui';
 import { IS_PLATFORM } from '../../../../constants/config';
 import { cn } from '../../../../lib/utils';
+import UsageIndicator from '../../../usage/view/UsageIndicator';
 
 type SearchMode = 'projects' | 'conversations';
 
@@ -20,6 +21,7 @@ type SidebarHeaderProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  onOpenUsageSettings: () => void;
   t: TFunction;
 };
 
@@ -37,6 +39,7 @@ export default function SidebarHeader({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  onOpenUsageSettings,
   t,
 }: SidebarHeaderProps) {
   const LogoBlock = () => (
@@ -71,6 +74,7 @@ export default function SidebarHeader({
           )}
 
           <div className="flex flex-shrink-0 items-center gap-0.5">
+            <UsageIndicator onOpenFullUsage={onOpenUsageSettings} />
             <Button
               variant="ghost"
               size="sm"

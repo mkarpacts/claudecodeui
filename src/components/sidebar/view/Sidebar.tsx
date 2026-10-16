@@ -30,6 +30,7 @@ function Sidebar({
   isLoading,
   onRefresh,
   onShowSettings,
+  onOpenUsageSettings,
   showSettings,
   settingsInitialTab,
   onCloseSettings,
@@ -267,6 +268,7 @@ function Sidebar({
             latestVersion={latestVersion}
             onShowVersionModal={() => setShowVersionModal(true)}
             onShowSettings={onShowSettings}
+            onOpenUsageSettings={onOpenUsageSettings}
             projectListProps={projectListProps}
             t={t}
           />

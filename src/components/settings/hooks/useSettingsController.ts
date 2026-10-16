@@ -6,6 +6,7 @@ import {
   DEFAULT_AUTH_STATUS,
   DEFAULT_CODE_EDITOR_SETTINGS,
   DEFAULT_CURSOR_PERMISSIONS,
+  SETTINGS_MAIN_TABS,
 } from '../constants/constants';
 import type {
   AgentProvider,
@@ -104,15 +105,13 @@ type NotificationPreferencesResponse = {
 
 type ActiveLoginProvider = AgentProvider | '';
 
-const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'appearance', 'git', 'api', 'tasks', 'notifications', 'plugins', 'sync', 'tokenUsage'];
-
 const normalizeMainTab = (tab: string): SettingsMainTab => {
   // Keep backwards compatibility with older callers that still pass "tools".
   if (tab === 'tools') {
     return 'agents';
   }
 
-  return KNOWN_MAIN_TABS.includes(tab as SettingsMainTab) ? (tab as SettingsMainTab) : 'agents';
+  return SETTINGS_MAIN_TABS.includes(tab as SettingsMainTab) ? (tab as SettingsMainTab) : 'agents';
 };
 
 const getErrorMessage = (error: unknown): string => (
