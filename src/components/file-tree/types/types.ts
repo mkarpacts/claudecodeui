@@ -4,6 +4,15 @@ export type FileTreeViewMode = 'simple' | 'compact' | 'detailed';
 
 export type FileTreeItemType = 'file' | 'directory';
 
+export type FileTreeSortField = 'name' | 'size' | 'modified';
+
+export type FileTreeSortDirection = 'asc' | 'desc';
+
+export interface FileTreeSort {
+  field: FileTreeSortField;
+  direction: FileTreeSortDirection;
+}
+
 export interface FileTreeNode {
   name: string;
   type: FileTreeItemType;

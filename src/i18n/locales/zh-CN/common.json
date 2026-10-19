@@ -107,6 +107,8 @@
     "size": "大小",
     "modified": "修改时间",
     "permissions": "权限",
+    "sortedAscending": "已按升序排序",
+    "sortedDescending": "已按降序排序",
     "noFilesFound": "未找到文件",
     "checkProjectPath": "检查项目路径是否可访问",
     "noMatchesFound": "未找到匹配项",

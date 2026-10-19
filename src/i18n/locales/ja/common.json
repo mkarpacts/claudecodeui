@@ -107,6 +107,8 @@
     "size": "サイズ",
     "modified": "更新日時",
     "permissions": "権限",
+    "sortedAscending": "昇順で並べ替え済み",
+    "sortedDescending": "降順で並べ替え済み",
     "noFilesFound": "ファイルが見つかりません",
     "checkProjectPath": "プロジェクトのパスがアクセス可能か確認してください",
     "noMatchesFound": "一致するものが見つかりません",

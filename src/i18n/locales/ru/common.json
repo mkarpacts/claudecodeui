@@ -107,6 +107,8 @@
     "size": "Размер",
     "modified": "Изменено",
     "permissions": "Права доступа",
+    "sortedAscending": "отсортировано по возрастанию",
+    "sortedDescending": "отсортировано по убыванию",
     "noFilesFound": "Файлы не найдены",
     "checkProjectPath": "Проверьте доступность пути к проекту",
     "noMatchesFound": "Совпадений не найдено",

@@ -107,6 +107,8 @@
     "size": "Größe",
     "modified": "Geändert",
     "permissions": "Berechtigungen",
+    "sortedAscending": "aufsteigend sortiert",
+    "sortedDescending": "absteigend sortiert",
     "noFilesFound": "Keine Dateien gefunden",
     "checkProjectPath": "Überprüf, ob der Projektpfad zugänglich ist",
     "noMatchesFound": "Keine Treffer gefunden",

@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, X, Loader2, Folder, Upload } from 'lucide-react';
 import { cn } from '../../../lib/utils';
@@ -7,10 +7,17 @@ import { useExpandedDirectories } from '../hooks/useExpandedDirectories';
 import { useFileTreeData } from '../hooks/useFileTreeData';
 import { useFileTreeOperations } from '../hooks/useFileTreeOperations';
 import { useFileTreeSearch } from '../hooks/useFileTreeSearch';
+import { useFileTreeSort } from '../hooks/useFileTreeSort';
 import { useFileTreeViewMode } from '../hooks/useFileTreeViewMode';
 import { useFileTreeUpload } from '../hooks/useFileTreeUpload';
 import type { FileTreeImageSelection, FileTreeNode } from '../types/types';
-import { formatFileSize, formatRelativeTime, isImageFile } from '../utils/fileTreeUtils';
+import {
+  formatFileSize,
+  formatRelativeTime,
+  isImageFile,
+  sortFileTree,
+  withLatestModified,
+} from '../utils/fileTreeUtils';
 import { Project } from '../../../types/app';
 import { ScrollArea, Input } from '../../../shared/view/ui';
 import FileTreeBody from './FileTreeBody';
@@ -48,8 +55,15 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
   const { files, loading, refreshFiles } = useFileTreeData(selectedProject);
   const { viewMode, changeViewMode } = useFileTreeViewMode();
   const { expandedDirs, toggleDirectory, expandDirectories, collapseAll } = useExpandedDirectories();
+  const { sort, toggleSort } = useFileTreeSort();
+  // Sort before searching: filtering keeps order, so typing in search never re-sorts the tree.
+  // Only the detailed view has sortable headers; the other views keep the server's folders-first A→Z order.
+  const sortedFiles = useMemo(
+    () => (viewMode === 'detailed' ? sortFileTree(withLatestModified(files), sort) : files),
+    [files, sort, viewMode],
+  );
   const { searchQuery, setSearchQuery, filteredFiles } = useFileTreeSearch({
-    files,
+    files: sortedFiles,
     expandDirectories,
   });
 
@@ -152,7 +166,9 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
         operationLoading={operations.operationLoading}
       />
 
-      {viewMode === 'detailed' && filteredFiles.length > 0 && <FileTreeDetailedColumns />}
+      {viewMode === 'detailed' && filteredFiles.length > 0 && (
+        <FileTreeDetailedColumns sort={sort} onSortChange={toggleSort} />
+      )}
 
       <ScrollArea className="flex-1 px-2 py-1">
         {/* New item input */}
