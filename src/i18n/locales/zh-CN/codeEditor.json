@@ -30,5 +30,14 @@
   "binaryFile": {
     "title": "二进制文件",
     "message": "文件 \"{{fileName}}\" 无法在文本编辑器中显示，因为它是二进制文件。"
+  },
+  "docxPreview": {
+    "loading": "正在渲染文档...",
+    "errorTitle": "无法预览",
+    "errorForbidden": "您没有读取此文件的权限。",
+    "errorNotFound": "该文件已不存在。",
+    "errorLoad": "无法加载文档。请检查网络连接后重试。",
+    "errorRender": "无法渲染此文档，文件可能已损坏。请下载后在 Word 中打开。",
+    "download": "下载"
   }
 }

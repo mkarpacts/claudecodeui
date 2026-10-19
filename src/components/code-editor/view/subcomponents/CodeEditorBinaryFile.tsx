@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { CodeEditorFile } from '../../types/types';
 
 type CodeEditorBinaryFileProps = {
@@ -8,6 +9,8 @@ type CodeEditorBinaryFileProps = {
   onToggleFullscreen: () => void;
   title: string;
   message: string;
+  // A preview of the file, shown instead of the "cannot be displayed" placeholder
+  children?: ReactNode;
 };
 
 export default function CodeEditorBinaryFile({
@@ -18,8 +21,11 @@ export default function CodeEditorBinaryFile({
   onToggleFullscreen,
   title,
   message,
+  children,
 }: CodeEditorBinaryFileProps) {
-  const binaryContent = (
+  const binaryContent = children ? (
+    <div className="min-h-0 flex-1">{children}</div>
+  ) : (
     <div className="flex h-full w-full flex-col items-center justify-center bg-background p-8 text-muted-foreground">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
@@ -68,9 +74,14 @@ export default function CodeEditorBinaryFile({
     ? 'fixed inset-0 z-[9999] bg-background flex flex-col'
     : 'fixed inset-0 z-[9999] md:bg-black/50 md:flex md:items-center md:justify-center md:p-4';
 
+  // A preview needs the same room as the text editor; the placeholder stays compact
+  const modalSizeClassName = children
+    ? 'md:max-w-6xl md:h-[80vh] md:max-h-[80vh]'
+    : 'md:max-w-2xl md:h-auto md:max-h-[60vh]';
+
   const innerClassName = isFullscreen
     ? 'bg-background flex flex-col w-full h-full'
-    : 'bg-background shadow-2xl flex flex-col w-full h-full md:rounded-lg md:shadow-2xl md:w-full md:max-w-2xl md:h-auto md:max-h-[60vh]';
+    : `bg-background shadow-2xl flex flex-col w-full h-full md:rounded-lg md:shadow-2xl md:w-full ${modalSizeClassName}`;
 
   return (
     <div className={containerClassName}>

@@ -32,5 +32,14 @@
   "binaryFile": {
     "title": "Binary File",
     "message": "The file \"{{fileName}}\" cannot be displayed in the text editor because it is a binary file."
+  },
+  "docxPreview": {
+    "loading": "Rendering document...",
+    "errorTitle": "Preview unavailable",
+    "errorForbidden": "You do not have permission to read this file.",
+    "errorNotFound": "The file no longer exists.",
+    "errorLoad": "The document could not be loaded. Check your connection and try again.",
+    "errorRender": "This document could not be rendered. It may be damaged — download it and open it in Word.",
+    "download": "Download"
   }
 }

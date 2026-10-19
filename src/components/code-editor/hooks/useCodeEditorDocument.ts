@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../utils/api';
+import { saveBlob } from '../../../utils/saveBlob';
 import type { CodeEditorFile } from '../types/types';
 import { isBinaryFile } from '../utils/binaryFile';
 
@@ -22,25 +23,24 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [isBinary, setIsBinary] = useState(false);
   const fileProjectName = file.projectName ?? projectPath;
   const filePath = file.path;
   const fileName = file.name;
   const fileDiffNewString = file.diffInfo?.new_string;
   const fileDiffOldString = file.diffInfo?.old_string;
+  // Derived from the name, not effect state, so it is correct on the very first render of a new file
+  const isBinary = isBinaryFile(fileName);
 
   useEffect(() => {
     const loadFileContent = async () => {
+      // Binary files are never read as text
+      if (isBinary) {
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        setIsBinary(false);
-
-        // Check if file is binary by extension
-        if (isBinaryFile(file.name)) {
-          setIsBinary(true);
-          setLoading(false);
-          return;
-        }
 
         // Diff payload may already include full old/new snapshots, so avoid disk read.
         if (file.diffInfo && fileDiffNewString !== undefined && fileDiffOldString !== undefined) {
@@ -70,7 +70,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     };
 
     loadFileContent();
-  }, [file.diffInfo, file.name, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectName]);
+  }, [file.diffInfo, isBinary, fileDiffNewString, fileDiffOldString, fileName, filePath, fileProjectName]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -109,18 +109,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
   }, [content, filePath, fileProjectName]);
 
   const handleDownload = useCallback(() => {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-
-    anchor.href = url;
-    anchor.download = file.name;
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-
-    URL.revokeObjectURL(url);
+    saveBlob(new Blob([content], { type: 'text/plain' }), file.name);
   }, [content, file.name]);
 
   return {
@@ -131,6 +120,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
     saveSuccess,
     saveError,
     isBinary,
+    fileProjectName,
     handleSave,
     handleDownload,
   };

@@ -32,5 +32,14 @@
   "binaryFile": {
     "title": "Binärdatei",
     "message": "Die Datei \"{{fileName}}\" kann im Texteditor nicht angezeigt werden, da es sich um eine Binärdatei handelt."
+  },
+  "docxPreview": {
+    "loading": "Dokument wird gerendert...",
+    "errorTitle": "Vorschau nicht verfügbar",
+    "errorForbidden": "Sie haben keine Berechtigung, diese Datei zu lesen.",
+    "errorNotFound": "Die Datei existiert nicht mehr.",
+    "errorLoad": "Das Dokument konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    "errorRender": "Dieses Dokument konnte nicht dargestellt werden. Es ist möglicherweise beschädigt — laden Sie es herunter und öffnen Sie es in Word.",
+    "download": "Herunterladen"
   }
 }

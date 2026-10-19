@@ -1,12 +1,13 @@
 import { EditorView } from '@codemirror/view';
 import { unifiedMergeView } from '@codemirror/merge';
 import type { Extension } from '@codemirror/state';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ComponentType } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCodeEditorDocument } from '../hooks/useCodeEditorDocument';
 import { useCodeEditorSettings } from '../hooks/useCodeEditorSettings';
 import { useEditorKeyboardShortcuts } from '../hooks/useEditorKeyboardShortcuts';
 import type { CodeEditorFile } from '../types/types';
+import { getFileExtension } from '../utils/binaryFile';
 import { createMinimapExtension, createScrollToFirstChunkExtension, getLanguageExtensions } from '../utils/editorExtensions';
 import { getEditorStyles } from '../utils/editorStyles';
 import { createEditorToolbarPanelExtension } from '../utils/editorToolbarPanel';
@@ -15,6 +16,13 @@ import CodeEditorHeader from './subcomponents/CodeEditorHeader';
 import CodeEditorLoadingState from './subcomponents/CodeEditorLoadingState';
 import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
+import DocxPreview, { type DocxPreviewProps } from './subcomponents/DocxPreview';
+
+// Binary formats with a read-only preview instead of the "cannot be displayed" placeholder
+const BINARY_PREVIEWS: Record<string, ComponentType<DocxPreviewProps>> = {
+  docx: DocxPreview,
+  dotx: DocxPreview,
+};
 
 type CodeEditorProps = {
   file: CodeEditorFile;
@@ -56,6 +64,7 @@ export default function CodeEditor({
     saveSuccess,
     saveError,
     isBinary,
+    fileProjectName,
     handleSave,
     handleDownload,
   } = useCodeEditorDocument({
@@ -64,7 +73,7 @@ export default function CodeEditor({
   });
 
   const isMarkdownFile = useMemo(() => {
-    const extension = file.name.split('.').pop()?.toLowerCase();
+    const extension = getFileExtension(file.name);
     return extension === 'md' || extension === 'markdown';
   }, [file.name]);
 
@@ -150,18 +159,10 @@ export default function CodeEditor({
     dependency: content,
   });
 
-  if (loading) {
-    return (
-      <CodeEditorLoadingState
-        isDarkMode={isDarkMode}
-        isSidebar={isSidebar}
-        loadingText={t('loading', { fileName: file.name })}
-      />
-    );
-  }
-
-  // Binary file display
+  // Binary file display — checked before `loading`, which only tracks text reads,
+  // so a preview is not unmounted and refetched while a file switch settles
   if (isBinary) {
+    const BinaryPreview = BINARY_PREVIEWS[getFileExtension(file.name)];
     return (
       <CodeEditorBinaryFile
         file={file}
@@ -171,6 +172,18 @@ export default function CodeEditor({
         onToggleFullscreen={() => setIsFullscreen((previous) => !previous)}
         title={t('binaryFile.title', 'Binary File')}
         message={t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name })}
+      >
+        {BinaryPreview && <BinaryPreview projectName={fileProjectName} filePath={file.path} />}
+      </CodeEditorBinaryFile>
+    );
+  }
+
+  if (loading) {
+    return (
+      <CodeEditorLoadingState
+        isDarkMode={isDarkMode}
+        isSidebar={isSidebar}
+        loadingText={t('loading', { fileName: file.name })}
       />
     );
   }
