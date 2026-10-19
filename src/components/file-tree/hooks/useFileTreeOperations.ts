@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import JSZip from 'jszip';
 import { api } from '../../../utils/api';
+import { saveBlob } from '../../../utils/saveBlob';
 import type { FileTreeNode } from '../types/types';
 import type { Project } from '../../../types/app';
 
@@ -9,21 +10,8 @@ import type { Project } from '../../../types/app';
 const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\x00-\x1f]/;
 const RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 
-// Save a blob through a temporary anchor. Revoke later: revoking in the same tick
-// as click() can abort large downloads in Firefox/Safari.
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-
-  anchor.href = url;
-  anchor.download = filename;
-
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+// Parallel requests when collecting a folder into a ZIP
+const ZIP_FETCH_CONCURRENCY = 6;
 
 export type ToastMessage = {
   message: string;
@@ -284,32 +272,33 @@ export function useFileTreeOperations({
     const zip = new JSZip();
     const skipped: string[] = [];
 
-    // Recursively get all files in the folder
-    const collectFiles = async (node: FileTreeNode, currentPath: string) => {
-      const fullPath = currentPath ? `${currentPath}/${node.name}` : node.name;
-
+    // Flatten the folder into (zip path, file node) pairs
+    const files: { zipPath: string; node: FileTreeNode }[] = [];
+    const collectFiles = (node: FileTreeNode, currentPath: string) => {
+      const zipPath = currentPath ? `${currentPath}/${node.name}` : node.name;
       if (node.type === 'file') {
-        // Fetch file content
-        const response = await api.readFileBinary(selectedProject.name, node.path);
-        if (response.ok) {
-          zip.file(fullPath, await response.blob());
-        } else {
-          skipped.push(fullPath);
-        }
+        files.push({ zipPath, node });
       } else if (node.type === 'directory' && node.children) {
-        // Recursively process children
-        for (const child of node.children) {
-          await collectFiles(child, fullPath);
+        node.children.forEach((child) => collectFiles(child, zipPath));
+      }
+    };
+    folder.children?.forEach((child) => collectFiles(child, ''));
+
+    // Fetch with bounded concurrency; a failed or unreadable file is reported, not fatal
+    let next = 0;
+    const worker = async () => {
+      while (next < files.length) {
+        const { zipPath, node } = files[next++];
+        try {
+          const response = await api.readFileBinary(selectedProject.name, node.path);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          zip.file(zipPath, await response.blob());
+        } catch {
+          skipped.push(zipPath);
         }
       }
     };
-
-    // If the folder has children, process them
-    if (folder.children && folder.children.length > 0) {
-      for (const child of folder.children) {
-        await collectFiles(child, '');
-      }
-    }
+    await Promise.all(Array.from({ length: Math.min(ZIP_FETCH_CONCURRENCY, files.length) }, worker));
 
     // Generate ZIP file
     const zipBlob = await zip.generateAsync({ type: 'blob' });

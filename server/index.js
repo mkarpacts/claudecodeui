@@ -773,13 +773,18 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
         }
         const { resolved } = validation;
 
-        // Check the file exists and is readable
+        // Check the path is a readable regular file
+        let stats;
         try {
             await fsPromises.access(resolved, fs.constants.R_OK);
+            stats = await fsPromises.stat(resolved);
         } catch (error) {
             if (error.code === 'EACCES') {
                 return res.status(403).json({ error: 'Permission denied' });
             }
+            return res.status(404).json({ error: 'File not found' });
+        }
+        if (!stats.isFile()) {
             return res.status(404).json({ error: 'File not found' });
         }
 
@@ -790,6 +795,8 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
         // Stream the file
         const fileStream = fs.createReadStream(resolved);
         fileStream.pipe(res);
+        // pipe() does not close the source when the client aborts — release the file handle
+        res.on('close', () => fileStream.destroy());
 
         fileStream.on('error', (error) => {
             console.error('Error streaming file:', error);

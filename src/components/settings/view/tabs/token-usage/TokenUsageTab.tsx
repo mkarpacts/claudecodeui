@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Coins, Download, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../../../../contexts/AuthContext';
 import { api } from '../../../../../utils/api';
+import { saveBlob } from '../../../../../utils/saveBlob';
 import TokenUsageSessionDetail from './TokenUsageSessionDetail';
 import Pagination from './Pagination';
 import Tooltip from '../../../../../shared/view/ui/Tooltip';
@@ -153,15 +154,7 @@ export default function TokenUsageTab() {
         sortDir,
       });
       if (!res.ok) throw new Error(`Server error (${res.status})`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'token-usage-sessions.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      saveBlob(await res.blob(), 'token-usage-sessions.csv');
     } catch {
       setExportError(t('tokenUsage.exportError'));
     }
