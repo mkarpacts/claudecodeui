@@ -84,9 +84,14 @@ export default function EditorSidebar({
     return null;
   }
 
+  // A fresh editor per open so view modes such as the markdown preview and the
+  // diff toggle start from that file's defaults
+  const editorKey = editingFile.openId ?? editingFile.path;
+
   if (isMobile || poppedOut) {
     return (
       <CodeEditor
+        key={editorKey}
         file={editingFile}
         onClose={() => {
           setPoppedOut(false);
@@ -119,6 +124,7 @@ export default function EditorSidebar({
         style={useFlexLayout ? undefined : { width: `${effectiveWidth}px`, minWidth: `${MIN_EDITOR_WIDTH}px` }}
       >
         <CodeEditor
+          key={editorKey}
           file={editingFile}
           onClose={onCloseEditor}
           projectPath={projectPath}

@@ -9,6 +9,8 @@ export type CodeEditorFile = {
   path: string;
   projectName?: string;
   diffInfo?: CodeEditorDiffInfo | null;
+  // Unique per open: a reopened file (new diff, other project) gets a fresh editor
+  openId?: number;
   [key: string]: unknown;
 };
 

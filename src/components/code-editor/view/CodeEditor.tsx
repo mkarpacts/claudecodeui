@@ -18,6 +18,9 @@ import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
 import DocxPreview, { type DocxPreviewProps } from './subcomponents/DocxPreview';
 
+// Markdown above this size opens as source: the rendered preview is not virtualised
+const MARKDOWN_PREVIEW_MAX_CHARS = 200_000;
+
 // Binary formats with a read-only preview instead of the "cannot be displayed" placeholder
 const BINARY_PREVIEWS: Record<string, ComponentType<DocxPreviewProps>> = {
   docx: DocxPreview,
@@ -44,9 +47,12 @@ export default function CodeEditor({
   onPopOut = null,
 }: CodeEditorProps) {
   const { t } = useTranslation('codeEditor');
+  const extension = getFileExtension(file.name);
+  const isMarkdownFile = extension === 'md' || extension === 'markdown';
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showDiff, setShowDiff] = useState(Boolean(file.diffInfo));
-  const [markdownPreview, setMarkdownPreview] = useState(false);
+  // null until the user toggles; until then the view mode follows the defaults below
+  const [markdownPreviewChoice, setMarkdownPreviewChoice] = useState<boolean | null>(null);
 
   const {
     isDarkMode,
@@ -72,10 +78,20 @@ export default function CodeEditor({
     projectPath,
   });
 
-  const isMarkdownFile = useMemo(() => {
-    const extension = getFileExtension(file.name);
-    return extension === 'md' || extension === 'markdown';
-  }, [file.name]);
+  // Markdown opens rendered, except when it was opened to show a chat diff (same
+  // condition that renders the merge view) or is too large to render without stalling
+  const opensAsDiff = file.diffInfo?.old_string !== undefined;
+  const markdownPreview = markdownPreviewChoice
+    ?? (isMarkdownFile && !opensAsDiff && content.length <= MARKDOWN_PREVIEW_MAX_CHARS);
+
+  // The first edit pins the current mode, so shrinking a large file below the
+  // size limit does not flip it into the preview mid-typing
+  const handleContentChange = (value: string) => {
+    if (markdownPreviewChoice === null) {
+      setMarkdownPreviewChoice(markdownPreview);
+    }
+    setContent(value);
+  };
 
   const minimapExtension = useMemo(
     () => (
@@ -159,10 +175,9 @@ export default function CodeEditor({
     dependency: content,
   });
 
-  // Binary file display — checked before `loading`, which only tracks text reads,
-  // so a preview is not unmounted and refetched while a file switch settles
+  // Binary files are never read as text, so they skip the text loading state
   if (isBinary) {
-    const BinaryPreview = BINARY_PREVIEWS[getFileExtension(file.name)];
+    const BinaryPreview = BINARY_PREVIEWS[extension];
     return (
       <CodeEditorBinaryFile
         file={file}
@@ -211,7 +226,7 @@ export default function CodeEditor({
             markdownPreview={markdownPreview}
             saving={saving}
             saveSuccess={saveSuccess}
-            onToggleMarkdownPreview={() => setMarkdownPreview((previous) => !previous)}
+            onToggleMarkdownPreview={() => setMarkdownPreviewChoice(!markdownPreview)}
             onOpenSettings={() => window.openSettings?.('appearance')}
             onDownload={handleDownload}
             onSave={handleSave}
@@ -241,7 +256,7 @@ export default function CodeEditor({
           <div className="flex-1 overflow-hidden">
             <CodeEditorSurface
               content={content}
-              onChange={setContent}
+              onChange={handleContentChange}
               markdownPreview={markdownPreview}
               isMarkdownFile={isMarkdownFile}
               isDarkMode={isDarkMode}

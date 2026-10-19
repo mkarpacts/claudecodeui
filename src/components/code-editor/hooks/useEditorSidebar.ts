@@ -20,17 +20,20 @@ export const useEditorSidebar = ({
   const [isResizing, setIsResizing] = useState(false);
   const [hasManualWidth, setHasManualWidth] = useState(false);
   const resizeHandleRef = useRef<HTMLDivElement | null>(null);
+  const openCounterRef = useRef(0);
 
   const handleFileOpen = useCallback(
     (filePath: string, diffInfo: CodeEditorDiffInfo | null = null) => {
       const normalizedPath = filePath.replace(/\\/g, '/');
       const fileName = normalizedPath.split('/').pop() || filePath;
 
+      openCounterRef.current += 1;
       setEditingFile({
         name: fileName,
         path: filePath,
         projectName: selectedProject?.name,
         diffInfo,
+        openId: openCounterRef.current,
       });
     },
     [selectedProject?.name],
