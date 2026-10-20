@@ -55,6 +55,12 @@
     "summary": "Files: {{count}} · Size: {{size}}",
     "columnName": "Name",
     "columnSize": "Size",
-    "columnModified": "Modified"
+    "columnModified": "Modified",
+    "back": "Back to archive",
+    "entryLoading": "Extracting file...",
+    "entryBinary": "This file cannot be previewed. Download it to open it.",
+    "entryTooLarge": "This file is too large to preview. Download it to open it.",
+    "entryError": "This file could not be extracted from the archive.",
+    "entryDownloadTooLarge": "Too large to extract here. Download the whole archive instead."
   }
 }

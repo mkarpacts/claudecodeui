@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type JSZip from 'jszip';
 import { cn } from '../../../../lib/utils';
@@ -15,8 +15,9 @@ import type { BinaryPreviewProps } from '../../types/types';
 import { failureFromStatus, failureKindOf, PreviewFailure, type FetchFailureKind } from '../../utils/binaryPreview';
 import { decodeZipFileName } from '../../utils/zipFileName';
 import { BinaryPreviewError, BinaryPreviewLoading } from './BinaryPreviewStatus';
+import ZipEntryViewer, { type ArchiveFileNode } from './ZipEntryViewer';
 
-// JSZip holds the whole archive in memory (twice, as a Blob and an ArrayBuffer)
+// The whole archive is held in memory while the preview is open
 const ZIP_PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
 
 // Name | size | modified — shared by the header and every row so the columns line up
@@ -24,7 +25,8 @@ const ROW_GRID = 'grid grid-cols-[minmax(0,1fr)_5rem_8.5rem] items-center gap-2 
 
 type FailureKind = FetchFailureKind | 'tooLarge' | 'corrupt' | 'encrypted';
 
-// Entries use the project tree's node shape, so they sort and look like it
+// Entries use the project tree's node shape, so they sort and look like it.
+// File nodes are ArchiveFileNodes: they carry the JSZip entry, extracted only when opened.
 type Archive = {
   nodes: FileTreeNode[];
   fileCount: number;
@@ -91,7 +93,8 @@ function buildArchive(zip: JSZip): Archive {
     if (segments.length === 0) continue;
 
     const modified = entry.date?.toISOString();
-    if (entry.dir) {
+    // JSZip only knows "/" as a directory suffix; "docs\" would otherwise become an empty file
+    if (entry.dir || /[\\/]$/.test(entry.name)) {
       getFolder(segments)!.modified = modified;
       continue;
     }
@@ -105,6 +108,7 @@ function buildArchive(zip: JSZip): Archive {
       type: 'file',
       size: getUncompressedSize(entry),
       modified,
+      entry,
     });
     fileCount += 1;
   }
@@ -117,12 +121,13 @@ type ArchiveRowProps = {
   node: FileTreeNode;
   depth: number;
   isOpen: boolean;
-  onToggle: (path: string) => void;
+  // Folders toggle, files open
+  onSelect: (node: FileTreeNode) => void;
   formatDate: (modified?: string) => string;
 };
 
 // Memoised: toggling a folder re-renders only the rows whose props changed
-const ArchiveRow = memo(function ArchiveRow({ node, depth, isOpen, onToggle, formatDate }: ArchiveRowProps) {
+const ArchiveRow = memo(function ArchiveRow({ node, depth, isOpen, onSelect, formatDate }: ArchiveRowProps) {
   const isDirectory = node.type === 'directory';
 
   return (
@@ -130,8 +135,15 @@ const ArchiveRow = memo(function ArchiveRow({ node, depth, isOpen, onToggle, for
       role="treeitem"
       aria-level={depth + 1}
       aria-expanded={isDirectory ? isOpen : undefined}
-      className={cn(ROW_GRID, 'py-1 text-sm', isDirectory && 'cursor-pointer hover:bg-accent')}
-      onClick={isDirectory ? () => onToggle(node.path) : undefined}
+      tabIndex={0}
+      className={cn(ROW_GRID, 'cursor-pointer py-1 text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none')}
+      onClick={() => onSelect(node)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(node);
+        }
+      }}
     >
       <div className="flex min-w-0 items-center gap-1.5" style={{ paddingLeft: depth * 16 }}>
         <TreeItemIcon item={node} isOpen={isOpen} renderFileIcon={renderFileIcon} />
@@ -145,10 +157,13 @@ const ArchiveRow = memo(function ArchiveRow({ node, depth, isOpen, onToggle, for
 
 export default function ZipPreview({ projectName, filePath, fileName }: BinaryPreviewProps) {
   const { t, i18n } = useTranslation('codeEditor');
-  const blobRef = useRef<Blob | null>(null);
+  // The archive's bytes: JSZip reads them in place, Download saves them as they are
+  const bufferRef = useRef<ArrayBuffer | null>(null);
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
+  // The archive file being viewed; the tree stays mounted underneath to keep its scroll position
+  const [openedFile, setOpenedFile] = useState<ArchiveFileNode | null>(null);
   const { expandedDirs, toggleDirectory, expandDirectories, collapseAll } = useExpandedDirectories();
 
   useEffect(() => {
@@ -156,8 +171,9 @@ export default function ZipPreview({ projectName, filePath, fileName }: BinaryPr
 
     const load = async () => {
       setState({ status: 'loading' });
+      setOpenedFile(null);
       collapseAll();
-      blobRef.current = null;
+      bufferRef.current = null;
 
       try {
         if (!projectName) {
@@ -177,18 +193,18 @@ export default function ZipPreview({ projectName, filePath, fileName }: BinaryPr
           throw new PreviewFailure<FailureKind>('tooLarge');
         }
 
-        const blob = await response.blob();
+        const buffer = await response.arrayBuffer();
         // Checked first: a superseded load must not leave its bytes for the next file's Download
         if (controller.signal.aborted) return;
-        blobRef.current = blob;
-        // Covers a response without Content-Length; JSZip would otherwise copy it once more
-        if (blob.size > ZIP_PREVIEW_MAX_BYTES) {
+        bufferRef.current = buffer;
+        // Covers a response without Content-Length
+        if (buffer.byteLength > ZIP_PREVIEW_MAX_BYTES) {
           throw new PreviewFailure<FailureKind>('tooLarge');
         }
 
         let zip: JSZip;
         try {
-          zip = await JSZipLib.loadAsync(blob, { decodeFileName: decodeZipFileName });
+          zip = await JSZipLib.loadAsync(buffer, { decodeFileName: decodeZipFileName });
         } catch (readError) {
           console.error('Error reading archive:', readError);
           // JSZip rejects the whole archive when any entry is encrypted
@@ -237,10 +253,21 @@ export default function ZipPreview({ projectName, filePath, fileName }: BinaryPr
     return rows;
   }, [state, expandedDirs]);
 
+  // Stable, so the viewer's Escape listener is not re-registered on every render
+  const closeFile = useCallback(() => setOpenedFile(null), []);
+
+  const handleSelect = useCallback((node: FileTreeNode) => {
+    if (node.type === 'directory') {
+      toggleDirectory(node.path);
+    } else {
+      setOpenedFile(node as ArchiveFileNode);
+    }
+  }, [toggleDirectory]);
+
   // A too-large archive was never read, so it is fetched only now
   const handleDownload = async () => {
-    if (blobRef.current) {
-      saveBlob(blobRef.current, fileName);
+    if (bufferRef.current) {
+      saveBlob(new Blob([bufferRef.current]), fileName);
       return;
     }
     if (!projectName) return;
@@ -292,42 +319,47 @@ export default function ZipPreview({ projectName, filePath, fileName }: BinaryPr
   const { archive } = state;
 
   return (
-    <div className="flex h-full w-full flex-col bg-background">
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
-        <span className="truncate text-xs text-muted-foreground">
-          {t('zipPreview.summary', 'Files: {{count}} · Size: {{size}}', {
-            count: archive.fileCount,
-            size: formatFileSize(archive.totalSize),
-          })}
-        </span>
-        {downloadButton}
-      </div>
-
-      {archive.nodes.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-          {t('zipPreview.empty', 'The archive is empty.')}
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className={cn(ROW_GRID, 'border-b border-border py-1.5 text-xs font-medium uppercase text-muted-foreground')}>
-            <span>{t('zipPreview.columnName', 'Name')}</span>
-            <span className="text-right">{t('zipPreview.columnSize', 'Size')}</span>
-            <span>{t('zipPreview.columnModified', 'Modified')}</span>
-          </div>
-          <div role="tree">
-            {visibleRows.map(({ node, depth }) => (
-              <ArchiveRow
-                key={node.id as string}
-                node={node}
-                depth={depth}
-                isOpen={node.type === 'directory' && expandedDirs.has(node.path)}
-                onToggle={toggleDirectory}
-                formatDate={formatDate}
-              />
-            ))}
-          </div>
-        </div>
+    <>
+      {openedFile && (
+        <ZipEntryViewer key={openedFile.id as string} file={openedFile} onBack={closeFile} />
       )}
-    </div>
+      <div className={cn('flex h-full w-full flex-col bg-background', openedFile && 'hidden')}>
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border px-3 py-2">
+          <span className="truncate text-xs text-muted-foreground">
+            {t('zipPreview.summary', 'Files: {{count}} · Size: {{size}}', {
+              count: archive.fileCount,
+              size: formatFileSize(archive.totalSize),
+            })}
+          </span>
+          {downloadButton}
+        </div>
+
+        {archive.nodes.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+            {t('zipPreview.empty', 'The archive is empty.')}
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <div className={cn(ROW_GRID, 'border-b border-border py-1.5 text-xs font-medium uppercase text-muted-foreground')}>
+              <span>{t('zipPreview.columnName', 'Name')}</span>
+              <span className="text-right">{t('zipPreview.columnSize', 'Size')}</span>
+              <span>{t('zipPreview.columnModified', 'Modified')}</span>
+            </div>
+            <div role="tree">
+              {visibleRows.map(({ node, depth }) => (
+                <ArchiveRow
+                  key={node.id as string}
+                  node={node}
+                  depth={depth}
+                  isOpen={node.type === 'directory' && expandedDirs.has(node.path)}
+                  onSelect={handleSelect}
+                  formatDate={formatDate}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

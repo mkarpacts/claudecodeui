@@ -800,6 +800,13 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
 
         // Stream exactly the declared length, even if the file grows while it is being sent
         const fileStream = fs.createReadStream(resolved, { start: 0, end: stats.size - 1 });
+        // A file truncated mid-stream falls short of Content-Length: abort so the client fails fast
+        // instead of waiting for bytes that never come. Registered before pipe() so it runs first.
+        fileStream.on('end', () => {
+            if (fileStream.bytesRead < stats.size) {
+                res.destroy(new Error('File shrank while streaming'));
+            }
+        });
         fileStream.pipe(res);
         // pipe() does not close the source when the client aborts — release the file handle
         res.on('close', () => fileStream.destroy());

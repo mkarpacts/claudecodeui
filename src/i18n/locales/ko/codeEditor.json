@@ -53,6 +53,12 @@
     "summary": "파일: {{count}} · 크기: {{size}}",
     "columnName": "이름",
     "columnSize": "크기",
-    "columnModified": "수정됨"
+    "columnModified": "수정됨",
+    "back": "압축 파일로 돌아가기",
+    "entryLoading": "파일 압축을 푸는 중...",
+    "entryBinary": "이 파일은 미리 볼 수 없습니다. 다운로드하여 여세요.",
+    "entryTooLarge": "이 파일은 너무 커서 미리 볼 수 없습니다. 다운로드하여 여세요.",
+    "entryError": "압축 파일에서 이 파일을 추출할 수 없습니다.",
+    "entryDownloadTooLarge": "여기서 추출하기에는 너무 큽니다. 압축 파일 전체를 다운로드하세요."
   }
 }

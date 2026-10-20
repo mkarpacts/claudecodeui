@@ -55,6 +55,12 @@
     "summary": "Dateien: {{count}} · Größe: {{size}}",
     "columnName": "Name",
     "columnSize": "Größe",
-    "columnModified": "Geändert"
+    "columnModified": "Geändert",
+    "back": "Zurück zum Archiv",
+    "entryLoading": "Datei wird entpackt...",
+    "entryBinary": "Für diese Datei ist keine Vorschau verfügbar. Laden Sie sie herunter, um sie zu öffnen.",
+    "entryTooLarge": "Diese Datei ist für die Vorschau zu groß. Laden Sie sie herunter, um sie zu öffnen.",
+    "entryError": "Diese Datei konnte nicht aus dem Archiv entpackt werden.",
+    "entryDownloadTooLarge": "Zu groß zum Entpacken hier. Laden Sie stattdessen das ganze Archiv herunter."
   }
 }

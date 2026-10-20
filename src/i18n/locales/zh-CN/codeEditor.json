@@ -53,6 +53,12 @@
     "summary": "文件：{{count}} · 大小：{{size}}",
     "columnName": "名称",
     "columnSize": "大小",
-    "columnModified": "修改时间"
+    "columnModified": "修改时间",
+    "back": "返回压缩包",
+    "entryLoading": "正在解压文件...",
+    "entryBinary": "无法预览此文件。请下载后打开。",
+    "entryTooLarge": "此文件过大，无法预览。请下载后打开。",
+    "entryError": "无法从压缩包中提取此文件。",
+    "entryDownloadTooLarge": "文件过大，无法在此解压。请下载整个压缩包。"
   }
 }

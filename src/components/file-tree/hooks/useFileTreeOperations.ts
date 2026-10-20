@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import JSZip from 'jszip';
 import { api } from '../../../utils/api';
 import { downloadProjectFile } from '../../../utils/downloadProjectFile';
 import { saveBlob } from '../../../utils/saveBlob';
@@ -264,6 +263,8 @@ export function useFileTreeOperations({
   const downloadFolderAsZip = useCallback(async (folder: FileTreeNode) => {
     if (!selectedProject) return;
 
+    // Loaded on demand, like in the ZIP preview, so JSZip stays out of the main bundle
+    const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
     const skipped: string[] = [];
 

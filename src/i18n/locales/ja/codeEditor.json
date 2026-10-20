@@ -53,6 +53,12 @@
     "summary": "ファイル数: {{count}} · サイズ: {{size}}",
     "columnName": "名前",
     "columnSize": "サイズ",
-    "columnModified": "更新日時"
+    "columnModified": "更新日時",
+    "back": "アーカイブに戻る",
+    "entryLoading": "ファイルを展開しています...",
+    "entryBinary": "このファイルはプレビューできません。ダウンロードして開いてください。",
+    "entryTooLarge": "このファイルは大きすぎてプレビューできません。ダウンロードして開いてください。",
+    "entryError": "このファイルをアーカイブから展開できませんでした。",
+    "entryDownloadTooLarge": "ここで展開するには大きすぎます。アーカイブ全体をダウンロードしてください。"
   }
 }

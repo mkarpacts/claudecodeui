@@ -8,9 +8,8 @@ const CP852_HIGH =
   '└┴┬├─┼Ăă╚╔╩╦╠═╬¤' + // 0xC0
   'đĐĎËďŇÍÎě┘┌█▄ŢŮ▀' + // 0xD0
   'ÓßÔŃńňŠšŔÚŕŰýÝţ´' + // 0xE0
-  '­˝˛ˇ˘§÷¸°¨˙űŘř■ '; // 0xF0
+  '\u00ad˝˛ˇ˘§÷¸°¨˙űŘř■\u00a0'; // 0xF0
 
-const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 
 const decodeCp852 = (bytes: Uint8Array): string => {
   let result = '';
@@ -20,15 +19,22 @@ const decodeCp852 = (bytes: Uint8Array): string => {
   return result;
 };
 
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+
+// Text from an archive carries no encoding: try UTF-8, else the given legacy decoding
+export function decodeUtf8Or(bytes: Uint8Array, fallback: (bytes: Uint8Array) => string): string {
+  try {
+    return utf8Decoder.decode(bytes);
+  } catch {
+    return fallback(bytes);
+  }
+}
+
 // JSZip calls this for names and comments that are not flagged as UTF-8. Many tools write
 // UTF-8 without the flag, so try it first; Windows Explorer on a Czech system writes CP852.
 // Must never throw: an exception here fails the whole archive.
 export function decodeZipFileName(bytes: string[] | Uint8Array | Buffer): string {
   // Browsers always pass a Uint8Array; the array form only exists without typed-array support
   const data = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes, Number);
-  try {
-    return utf8Decoder.decode(data);
-  } catch {
-    return decodeCp852(data);
-  }
+  return decodeUtf8Or(data, decodeCp852);
 }
