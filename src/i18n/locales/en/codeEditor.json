@@ -33,13 +33,28 @@
     "title": "Binary File",
     "message": "The file \"{{fileName}}\" cannot be displayed in the text editor because it is a binary file."
   },
-  "docxPreview": {
-    "loading": "Rendering document...",
+  "binaryPreview": {
     "errorTitle": "Preview unavailable",
     "errorForbidden": "You do not have permission to read this file.",
     "errorNotFound": "The file no longer exists.",
+    "download": "Download",
+    "downloadFailed": "Download failed. Try again."
+  },
+  "docxPreview": {
+    "loading": "Rendering document...",
     "errorLoad": "The document could not be loaded. Check your connection and try again.",
-    "errorRender": "This document could not be rendered. It may be damaged — download it and open it in Word.",
-    "download": "Download"
+    "errorRender": "This document could not be rendered. It may be damaged — download it and open it in Word."
+  },
+  "zipPreview": {
+    "loading": "Reading archive...",
+    "errorLoad": "The archive could not be loaded. Check your connection and try again.",
+    "errorTooLarge": "The archive is larger than {{limit}}, so its contents are not listed. Download it to open it locally.",
+    "errorCorrupt": "The archive could not be read. It may be damaged or use an unsupported format.",
+    "errorEncrypted": "The archive is password-protected, so its contents cannot be listed.",
+    "empty": "The archive is empty.",
+    "summary": "Files: {{count}} · Size: {{size}}",
+    "columnName": "Name",
+    "columnSize": "Size",
+    "columnModified": "Modified"
   }
 }

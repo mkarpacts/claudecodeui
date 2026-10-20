@@ -791,9 +791,15 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
         // Get file extension and set appropriate content type
         const mimeType = mime.lookup(resolved) || 'application/octet-stream';
         res.setHeader('Content-Type', mimeType);
+        // Lets the client see the size before reading the body (previews cap what they load)
+        res.setHeader('Content-Length', stats.size);
 
-        // Stream the file
-        const fileStream = fs.createReadStream(resolved);
+        if (stats.size === 0) {
+            return res.end();
+        }
+
+        // Stream exactly the declared length, even if the file grows while it is being sent
+        const fileStream = fs.createReadStream(resolved, { start: 0, end: stats.size - 1 });
         fileStream.pipe(res);
         // pipe() does not close the source when the client aborts — release the file handle
         res.on('close', () => fileStream.destroy());

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useCodeEditorDocument } from '../hooks/useCodeEditorDocument';
 import { useCodeEditorSettings } from '../hooks/useCodeEditorSettings';
 import { useEditorKeyboardShortcuts } from '../hooks/useEditorKeyboardShortcuts';
-import type { CodeEditorFile } from '../types/types';
+import type { BinaryPreviewProps, CodeEditorFile } from '../types/types';
 import { getFileExtension } from '../utils/binaryFile';
 import { createMinimapExtension, createScrollToFirstChunkExtension, getLanguageExtensions } from '../utils/editorExtensions';
 import { getEditorStyles } from '../utils/editorStyles';
@@ -16,15 +16,17 @@ import CodeEditorHeader from './subcomponents/CodeEditorHeader';
 import CodeEditorLoadingState from './subcomponents/CodeEditorLoadingState';
 import CodeEditorSurface from './subcomponents/CodeEditorSurface';
 import CodeEditorBinaryFile from './subcomponents/CodeEditorBinaryFile';
-import DocxPreview, { type DocxPreviewProps } from './subcomponents/DocxPreview';
+import DocxPreview from './subcomponents/DocxPreview';
+import ZipPreview from './subcomponents/ZipPreview';
 
 // Markdown above this size opens as source: the rendered preview is not virtualised
 const MARKDOWN_PREVIEW_MAX_CHARS = 200_000;
 
 // Binary formats with a read-only preview instead of the "cannot be displayed" placeholder
-const BINARY_PREVIEWS: Record<string, ComponentType<DocxPreviewProps>> = {
+const BINARY_PREVIEWS: Record<string, ComponentType<BinaryPreviewProps>> = {
   docx: DocxPreview,
   dotx: DocxPreview,
+  zip: ZipPreview,
 };
 
 type CodeEditorProps = {
@@ -188,7 +190,7 @@ export default function CodeEditor({
         title={t('binaryFile.title', 'Binary File')}
         message={t('binaryFile.message', 'The file "{{fileName}}" cannot be displayed in the text editor because it is a binary file.', { fileName: file.name })}
       >
-        {BinaryPreview && <BinaryPreview projectName={fileProjectName} filePath={file.path} />}
+        {BinaryPreview && <BinaryPreview projectName={fileProjectName} filePath={file.path} fileName={file.name} />}
       </CodeEditorBinaryFile>
     );
   }

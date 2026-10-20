@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import JSZip from 'jszip';
 import { api } from '../../../utils/api';
+import { downloadProjectFile } from '../../../utils/downloadProjectFile';
 import { saveBlob } from '../../../utils/saveBlob';
 import type { FileTreeNode } from '../types/types';
 import type { Project } from '../../../types/app';
@@ -256,13 +257,7 @@ export function useFileTreeOperations({
   const downloadSingleFile = useCallback(async (item: FileTreeNode) => {
     if (!selectedProject) return;
 
-    const response = await api.readFileBinary(selectedProject.name, item.path);
-
-    if (!response.ok) {
-      throw new Error('Failed to download file');
-    }
-
-    saveBlob(await response.blob(), item.name);
+    await downloadProjectFile(selectedProject.name, item.path, item.name);
   }, [selectedProject]);
 
   // Download folder as ZIP

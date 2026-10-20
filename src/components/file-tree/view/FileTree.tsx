@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, X, Loader2, Folder, Upload } from 'lucide-react';
 import { cn } from '../../../lib/utils';
-import { ICON_SIZE_CLASS, getFileIconData } from '../constants/fileIcons';
+import { ICON_SIZE_CLASS } from '../constants/fileIcons';
 import { useExpandedDirectories } from '../hooks/useExpandedDirectories';
 import { useFileTreeData } from '../hooks/useFileTreeData';
 import { useFileTreeOperations } from '../hooks/useFileTreeOperations';
@@ -11,6 +11,7 @@ import { useFileTreeSort } from '../hooks/useFileTreeSort';
 import { useFileTreeViewMode } from '../hooks/useFileTreeViewMode';
 import { useFileTreeUpload } from '../hooks/useFileTreeUpload';
 import type { FileTreeImageSelection, FileTreeNode } from '../types/types';
+import { renderFileIcon } from '../utils/renderFileIcon';
 import {
   formatFileSize,
   formatRelativeTime,
@@ -96,11 +97,6 @@ export default function FileTree({ selectedProject, onFileOpen }: FileTreeProps)
       renameInputRef.current.select();
     }
   }, [operations.renamingItem]);
-
-  const renderFileIcon = useCallback((filename: string) => {
-    const { icon: Icon, color } = getFileIconData(filename);
-    return <Icon className={cn(ICON_SIZE_CLASS, color)} />;
-  }, []);
 
   // Centralized click behavior keeps file actions identical across all presentation modes.
   const handleItemClick = useCallback(

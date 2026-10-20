@@ -1,21 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../../../utils/api';
+import { Button } from '../../../../shared/view/ui/Button';
 import { saveBlob } from '../../../../utils/saveBlob';
+import type { BinaryPreviewProps } from '../../types/types';
+import { failureFromStatus, failureKindOf, PreviewFailure, type FetchFailureKind } from '../../utils/binaryPreview';
+import { BinaryPreviewError, BinaryPreviewLoading } from './BinaryPreviewStatus';
 
-export type DocxPreviewProps = {
-  projectName?: string;
-  filePath: string;
-};
-
-type FailureKind = 'forbidden' | 'notFound' | 'load' | 'render';
+type FailureKind = FetchFailureKind | 'render';
 type PreviewState = { status: 'loading' | 'ready' } | { status: 'error'; kind: FailureKind };
-
-class PreviewFailure extends Error {
-  constructor(readonly kind: FailureKind) {
-    super(kind);
-  }
-}
 
 // Only plain web and mail links stay clickable; anything else (javascript:, file:, …) is stripped
 const SAFE_HREF = /^(https?:|mailto:|#)/i;
@@ -42,13 +35,7 @@ function sanitizeRenderedDocument(root: HTMLElement) {
   });
 }
 
-const failureFromStatus = (status: number): FailureKind => {
-  if (status === 403) return 'forbidden';
-  if (status === 404) return 'notFound';
-  return 'load';
-};
-
-export default function DocxPreview({ projectName, filePath }: DocxPreviewProps) {
+export default function DocxPreview({ projectName, filePath, fileName }: BinaryPreviewProps) {
   const { t } = useTranslation('codeEditor');
   const hostRef = useRef<HTMLDivElement>(null);
   const blobRef = useRef<Blob | null>(null);
@@ -68,7 +55,7 @@ export default function DocxPreview({ projectName, filePath }: DocxPreviewProps)
 
       try {
         if (!projectName) {
-          throw new PreviewFailure('load');
+          throw new PreviewFailure<FailureKind>('load');
         }
 
         // docx-preview is loaded on demand so it stays out of the main bundle
@@ -78,12 +65,13 @@ export default function DocxPreview({ projectName, filePath }: DocxPreviewProps)
         ]);
 
         if (!response.ok) {
-          throw new PreviewFailure(failureFromStatus(response.status));
+          throw new PreviewFailure<FailureKind>(failureFromStatus(response.status));
         }
 
         const blob = await response.blob();
-        blobRef.current = blob;
+        // Checked first: a superseded load must not leave its bytes for the next file's Download
         if (controller.signal.aborted) return;
+        blobRef.current = blob;
 
         // renderAsync cannot be cancelled: render off-screen and swap in only if still current
         const staging = document.createElement('div');
@@ -95,7 +83,7 @@ export default function DocxPreview({ projectName, filePath }: DocxPreviewProps)
           });
         } catch (renderError) {
           console.error('Error rendering document:', renderError);
-          throw new PreviewFailure('render');
+          throw new PreviewFailure<FailureKind>('render');
         }
         if (controller.signal.aborted) return;
 
@@ -104,11 +92,8 @@ export default function DocxPreview({ projectName, filePath }: DocxPreviewProps)
         setState({ status: 'ready' });
       } catch (error: unknown) {
         if (controller.signal.aborted) return;
-        if (!(error instanceof PreviewFailure)) {
-          console.error('Error loading document:', error);
-        }
         shadow.replaceChildren();
-        setState({ status: 'error', kind: error instanceof PreviewFailure ? error.kind : 'load' });
+        setState({ status: 'error', kind: failureKindOf<FailureKind>(error) });
       }
     };
 
@@ -122,47 +107,32 @@ export default function DocxPreview({ projectName, filePath }: DocxPreviewProps)
 
   const handleDownload = () => {
     if (blobRef.current) {
-      saveBlob(blobRef.current, filePath.split(/[\\/]/).pop() || 'document.docx');
+      saveBlob(blobRef.current, fileName);
     }
   };
 
   const errorMessages: Record<FailureKind, string> = {
-    forbidden: t('docxPreview.errorForbidden', 'You do not have permission to read this file.'),
-    notFound: t('docxPreview.errorNotFound', 'The file no longer exists.'),
+    forbidden: t('binaryPreview.errorForbidden', 'You do not have permission to read this file.'),
+    notFound: t('binaryPreview.errorNotFound', 'The file no longer exists.'),
     load: t('docxPreview.errorLoad', 'The document could not be loaded. Check your connection and try again.'),
     render: t('docxPreview.errorRender', 'This document could not be rendered. It may be damaged — download it and open it in Word.'),
   };
 
-  // Status blocks stay in normal flow: the Files-tab sidebar sizes itself to its content
   return (
     <div className="h-full w-full overflow-auto bg-muted">
       <div ref={hostRef} data-docx-preview="" />
 
-      {state.status === 'loading' && (
-        <div className="flex h-full items-center justify-center gap-3 p-8 text-sm text-muted-foreground">
-          <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-blue-600" />
-          {t('docxPreview.loading', 'Rendering document...')}
-        </div>
-      )}
+      {state.status === 'loading' && <BinaryPreviewLoading label={t('docxPreview.loading', 'Rendering document...')} />}
 
       {state.status === 'error' && (
-        <div className="flex h-full items-center justify-center p-8 text-center">
-          <div className="max-w-md">
-            <h3 className="mb-2 text-lg font-medium text-foreground">
-              {t('docxPreview.errorTitle', 'Preview unavailable')}
-            </h3>
-            <p className="text-sm text-muted-foreground">{errorMessages[state.kind]}</p>
-            {state.kind === 'render' && (
-              <button
-                type="button"
-                onClick={handleDownload}
-                className="mt-4 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                {t('docxPreview.download', 'Download')}
-              </button>
-            )}
-          </div>
-        </div>
+        <BinaryPreviewError
+          message={errorMessages[state.kind]}
+          action={state.kind === 'render' && (
+            <Button size="sm" onClick={handleDownload}>
+              {t('binaryPreview.download', 'Download')}
+            </Button>
+          )}
+        />
       )}
     </div>
   );

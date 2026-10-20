@@ -31,13 +31,28 @@
     "title": "二进制文件",
     "message": "文件 \"{{fileName}}\" 无法在文本编辑器中显示，因为它是二进制文件。"
   },
-  "docxPreview": {
-    "loading": "正在渲染文档...",
+  "binaryPreview": {
     "errorTitle": "无法预览",
     "errorForbidden": "您没有读取此文件的权限。",
     "errorNotFound": "该文件已不存在。",
+    "download": "下载",
+    "downloadFailed": "下载失败，请重试。"
+  },
+  "docxPreview": {
+    "loading": "正在渲染文档...",
     "errorLoad": "无法加载文档。请检查网络连接后重试。",
-    "errorRender": "无法渲染此文档，文件可能已损坏。请下载后在 Word 中打开。",
-    "download": "下载"
+    "errorRender": "无法渲染此文档，文件可能已损坏。请下载后在 Word 中打开。"
+  },
+  "zipPreview": {
+    "loading": "正在读取压缩包...",
+    "errorLoad": "无法加载压缩包。请检查网络连接后重试。",
+    "errorTooLarge": "压缩包大于 {{limit}}，因此不列出其内容。请下载后在本地打开。",
+    "errorCorrupt": "无法读取压缩包，文件可能已损坏或格式不受支持。",
+    "errorEncrypted": "压缩包受密码保护，无法列出其内容。",
+    "empty": "压缩包为空。",
+    "summary": "文件：{{count}} · 大小：{{size}}",
+    "columnName": "名称",
+    "columnSize": "大小",
+    "columnModified": "修改时间"
   }
 }

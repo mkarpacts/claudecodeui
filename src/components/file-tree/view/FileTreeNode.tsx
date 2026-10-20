@@ -37,7 +37,7 @@ type TreeItemIconProps = {
   renderFileIcon: (filename: string) => ReactNode;
 };
 
-function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
+export function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
   if (item.type === 'directory') {
     return (
       <span className="flex flex-shrink-0 items-center gap-0.5">

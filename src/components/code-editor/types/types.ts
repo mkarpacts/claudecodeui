@@ -14,6 +14,14 @@ export type CodeEditorFile = {
   [key: string]: unknown;
 };
 
+// Props of a read-only preview shown for a binary file instead of the placeholder
+export type BinaryPreviewProps = {
+  projectName?: string;
+  filePath: string;
+  // Used as the name of a downloaded copy
+  fileName: string;
+};
+
 export type CodeEditorSettingsState = {
   isDarkMode: boolean;
   wordWrap: boolean;

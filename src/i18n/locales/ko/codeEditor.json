@@ -31,13 +31,28 @@
     "title": "바이너리 파일",
     "message": "파일 \"{{fileName}}\"은(는) 바이너리 파일이므로 텍스트 편집기에서 표시할 수 없습니다."
   },
-  "docxPreview": {
-    "loading": "문서를 렌더링하는 중...",
+  "binaryPreview": {
     "errorTitle": "미리보기를 사용할 수 없음",
     "errorForbidden": "이 파일을 읽을 권한이 없습니다.",
     "errorNotFound": "파일이 더 이상 존재하지 않습니다.",
+    "download": "다운로드",
+    "downloadFailed": "다운로드하지 못했습니다. 다시 시도하세요."
+  },
+  "docxPreview": {
+    "loading": "문서를 렌더링하는 중...",
     "errorLoad": "문서를 불러올 수 없습니다. 연결을 확인하고 다시 시도하세요.",
-    "errorRender": "이 문서를 렌더링할 수 없습니다. 손상되었을 수 있습니다. 다운로드하여 Word에서 여세요.",
-    "download": "다운로드"
+    "errorRender": "이 문서를 렌더링할 수 없습니다. 손상되었을 수 있습니다. 다운로드하여 Word에서 여세요."
+  },
+  "zipPreview": {
+    "loading": "압축 파일을 읽는 중...",
+    "errorLoad": "압축 파일을 불러올 수 없습니다. 연결을 확인하고 다시 시도하세요.",
+    "errorTooLarge": "압축 파일이 {{limit}}보다 커서 내용을 표시하지 않습니다. 다운로드하여 로컬에서 여세요.",
+    "errorCorrupt": "압축 파일을 읽을 수 없습니다. 손상되었거나 지원되지 않는 형식일 수 있습니다.",
+    "errorEncrypted": "압축 파일이 암호로 보호되어 있어 내용을 표시할 수 없습니다.",
+    "empty": "압축 파일이 비어 있습니다.",
+    "summary": "파일: {{count}} · 크기: {{size}}",
+    "columnName": "이름",
+    "columnSize": "크기",
+    "columnModified": "수정됨"
   }
 }

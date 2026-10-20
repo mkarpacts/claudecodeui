@@ -33,13 +33,28 @@
     "title": "Binärdatei",
     "message": "Die Datei \"{{fileName}}\" kann im Texteditor nicht angezeigt werden, da es sich um eine Binärdatei handelt."
   },
-  "docxPreview": {
-    "loading": "Dokument wird gerendert...",
+  "binaryPreview": {
     "errorTitle": "Vorschau nicht verfügbar",
     "errorForbidden": "Sie haben keine Berechtigung, diese Datei zu lesen.",
     "errorNotFound": "Die Datei existiert nicht mehr.",
+    "download": "Herunterladen",
+    "downloadFailed": "Download fehlgeschlagen. Bitte erneut versuchen."
+  },
+  "docxPreview": {
+    "loading": "Dokument wird gerendert...",
     "errorLoad": "Das Dokument konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
-    "errorRender": "Dieses Dokument konnte nicht dargestellt werden. Es ist möglicherweise beschädigt — laden Sie es herunter und öffnen Sie es in Word.",
-    "download": "Herunterladen"
+    "errorRender": "Dieses Dokument konnte nicht dargestellt werden. Es ist möglicherweise beschädigt — laden Sie es herunter und öffnen Sie es in Word."
+  },
+  "zipPreview": {
+    "loading": "Archiv wird gelesen...",
+    "errorLoad": "Das Archiv konnte nicht geladen werden. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    "errorTooLarge": "Das Archiv ist größer als {{limit}}, daher wird sein Inhalt nicht aufgelistet. Laden Sie es herunter, um es lokal zu öffnen.",
+    "errorCorrupt": "Das Archiv konnte nicht gelesen werden. Es ist möglicherweise beschädigt oder hat ein nicht unterstütztes Format.",
+    "errorEncrypted": "Das Archiv ist passwortgeschützt, daher kann sein Inhalt nicht aufgelistet werden.",
+    "empty": "Das Archiv ist leer.",
+    "summary": "Dateien: {{count}} · Größe: {{size}}",
+    "columnName": "Name",
+    "columnSize": "Größe",
+    "columnModified": "Geändert"
   }
 }
