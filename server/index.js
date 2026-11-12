@@ -84,14 +84,15 @@ setContextWindowStore({
 });
 import { repairSessionsMeta } from './services/sessionsRepair.js';
 import { backfillSessionsMeta } from './services/sessionsBackfill.js';
-import { processAttachment } from './services/attachments/index.js';
+import { processAttachment, decodeUploadName } from './services/attachments/index.js';
 import { listProjectsLight } from './services/projectsList.js';
-import { OFFICE, LEGACY_OFFICE_EXTS, MAX_FILE_SIZE } from './services/attachments/constants.js';
+import { LEGACY_OFFICE_EXTS, MAX_FILE_SIZE, MAX_ATTACHMENTS } from './services/attachments/constants.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { registerClient, unregisterClient, broadcastToUser } from './lib/wsHub.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket, requireAdmin } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { getConnectableHost } from '../shared/networkHosts.js';
+import { ATTACHMENT_EXTENSIONS, ATTACHMENT_MIME_TYPES } from '../shared/attachmentTypes.js';
 
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
 
@@ -2159,26 +2160,13 @@ app.post('/api/projects/:projectName/upload-attachments', authenticateToken, asy
             }
         });
 
-        const allowedMimes = [
-            'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-            'text/plain', 'text/markdown', 'text/csv',
-            'application/pdf',
-            OFFICE.docx.mime, OFFICE.xlsx.mime,
-        ];
-
-        const allowedExts = new Set([
-            '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-            '.txt', '.md', '.csv', '.pdf',
-            OFFICE.docx.ext, OFFICE.xlsx.ext,
-        ]);
-
         const fileFilter = (req, file, cb) => {
             const ext = path.extname(file.originalname).toLowerCase();
             if (LEGACY_OFFICE_EXTS.has(ext)) {
                 return cb(new Error('Legacy .doc/.xls is not supported. Re-save as .docx/.xlsx.'));
             }
             // Accept by MIME OR extension — browser MIME for OOXML is unreliable.
-            if (allowedMimes.includes(file.mimetype) || allowedExts.has(ext)) {
+            if (ATTACHMENT_MIME_TYPES.has(file.mimetype) || ATTACHMENT_EXTENSIONS.has(ext)) {
                 return cb(null, true);
             }
             cb(new Error('Invalid file type. Allowed: images, txt, md, csv, pdf, docx, xlsx.'));
@@ -2189,12 +2177,12 @@ app.post('/api/projects/:projectName/upload-attachments', authenticateToken, asy
             fileFilter,
             limits: {
                 fileSize: MAX_FILE_SIZE, // 10MB, shared with client
-                files: 5
+                files: MAX_ATTACHMENTS
             }
         });
 
         // Handle multipart form data
-        upload.array('attachments', 5)(req, res, async (err) => {
+        upload.array('attachments', MAX_ATTACHMENTS)(req, res, async (err) => {
             if (err) {
                 return res.status(400).json({ error: err.message });
             }
@@ -2210,7 +2198,7 @@ app.post('/api/projects/:projectName/upload-attachments', authenticateToken, asy
                         await fs.unlink(file.path).catch(() => {});
                         return processAttachment({
                             buffer,
-                            name: file.originalname,
+                            name: decodeUploadName(file.originalname),
                             mimeType: file.mimetype,
                         });
                     })

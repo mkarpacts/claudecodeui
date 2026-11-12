@@ -8,8 +8,11 @@ import { WebSocketProvider } from './contexts/WebSocketContext';
 import { PluginsProvider } from './contexts/PluginsContext';
 import AppContent from './components/app/AppContent';
 import i18n from './i18n/config.js';
+import { usePreventFileDropNavigation } from './hooks/usePreventFileDropNavigation';
 
 export default function App() {
+  usePreventFileDropNavigation();
+
   return (
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>

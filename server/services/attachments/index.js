@@ -1,7 +1,5 @@
 // server/services/attachments/index.js
-import { extname, basename } from 'node:path';
-import { convertDocxToMarkdown } from './converters/docx.js';
-import { convertXlsxToMarkdown } from './converters/xlsx.js';
+import { extname } from 'node:path';
 import { OFFICE } from './constants.js';
 
 /** Returns 'docx' | 'xlsx' | null. Extension wins; MIME is a fallback (browser MIME is unreliable). */
@@ -12,30 +10,29 @@ export function detectKind(name, mimeType) {
   return null;
 }
 
-function toMarkdownAttachment(originalName, md) {
-  const base = basename(originalName || 'document', extname(originalName || ''));
-  const buf = Buffer.from(md, 'utf8'); // encode once; reused for size + base64
-  return {
-    name: `${base}.md`,
-    mimeType: 'text/markdown',
-    size: buf.length,
-    data: `data:text/markdown;base64,${buf.toString('base64')}`,
-  };
+/**
+ * multer/busboy decodes multipart filenames as latin1, so UTF-8 names arrive mangled.
+ * Re-decode when every char fits a byte and the bytes form valid UTF-8; otherwise keep as is.
+ */
+export function decodeUploadName(name) {
+  if (typeof name !== 'string' || /[^\x00-\xff]/.test(name)) return name;
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  return decoded.includes('�') ? name : decoded;
 }
 
 /**
  * Normalize an uploaded attachment for the chat pipeline.
- * Office files → converted Markdown (.md); everything else → base64 passthrough.
- * Throws on conversion failure (caller maps to an HTTP error).
+ * No conversion: every file (Office included) passes through as the original bytes in a
+ * base64 data URL. Office files get the canonical MIME type, because browsers often send
+ * an empty or generic one, which breaks the `^data:([^;]+);base64,` parsing downstream.
  */
 export async function processAttachment({ buffer, name, mimeType }) {
   const kind = detectKind(name, mimeType);
-  if (kind === 'docx') return toMarkdownAttachment(name, await convertDocxToMarkdown(buffer));
-  if (kind === 'xlsx') return toMarkdownAttachment(name, convertXlsxToMarkdown(buffer));
+  const mime = kind ? OFFICE[kind].mime : mimeType;
   return {
     name,
-    mimeType,
+    mimeType: mime,
     size: buffer.length,
-    data: `data:${mimeType};base64,${buffer.toString('base64')}`,
+    data: `data:${mime};base64,${buffer.toString('base64')}`,
   };
 }

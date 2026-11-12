@@ -21,25 +21,15 @@ import type {
 } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import {
+  ATTACHMENT_EXTENSIONS,
+  ATTACHMENT_MIME_TYPES,
+  ATTACHMENT_TYPES,
+  MAX_ATTACHMENT_SIZE,
+  MAX_ATTACHMENTS,
+} from '../../../../shared/attachmentTypes';
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
-
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-  'text/plain', 'text/markdown', 'text/csv',
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',       // .xlsx
-]);
-
-const ALLOWED_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-  '.txt', '.md', '.csv', '.pdf',
-  '.docx', '.xlsx',
-]);
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_FILES = 5;
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -428,14 +418,14 @@ export function useChatComposerState({
         }
 
         const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
-        const mimeAllowed = ALLOWED_MIME_TYPES.has(file.type);
-        const extAllowed = ALLOWED_EXTENSIONS.has(ext);
+        const mimeAllowed = ATTACHMENT_MIME_TYPES.has(file.type);
+        const extAllowed = ATTACHMENT_EXTENSIONS.has(ext);
 
         if (!mimeAllowed && !extAllowed) {
           return false;
         }
 
-        if (!file.size || file.size > MAX_FILE_SIZE) {
+        if (!file.size || file.size > MAX_ATTACHMENT_SIZE) {
           setFileErrors((previous) => {
             const next = new Map(previous);
             next.set(file.name || 'Unknown file', 'File too large (max 10MB)');
@@ -452,7 +442,7 @@ export function useChatComposerState({
     });
 
     if (validFiles.length > 0) {
-      setAttachedFiles((previous) => [...previous, ...validFiles].slice(0, MAX_FILES));
+      setAttachedFiles((previous) => [...previous, ...validFiles].slice(0, MAX_ATTACHMENTS));
     }
   }, []);
 
@@ -462,7 +452,7 @@ export function useChatComposerState({
       const pastedFiles: File[] = [];
 
       items.forEach((item) => {
-        if (ALLOWED_MIME_TYPES.has(item.type)) {
+        if (ATTACHMENT_MIME_TYPES.has(item.type)) {
           const file = item.getAsFile();
           if (file) pastedFiles.push(file);
         }
@@ -472,7 +462,7 @@ export function useChatComposerState({
         const files = Array.from(event.clipboardData.files);
         const validFiles = files.filter((file) => {
           const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
-          return ALLOWED_MIME_TYPES.has(file.type) || ALLOWED_EXTENSIONS.has(ext);
+          return ATTACHMENT_MIME_TYPES.has(file.type) || ATTACHMENT_EXTENSIONS.has(ext);
         });
         if (validFiles.length > 0) pastedFiles.push(...validFiles);
       }
@@ -485,17 +475,9 @@ export function useChatComposerState({
   );
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
-    accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'],
-      'text/plain': ['.txt'],
-      'text/markdown': ['.md'],
-      'text/csv': ['.csv'],
-      'application/pdf': ['.pdf'],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-    },
-    maxSize: MAX_FILE_SIZE,
-    maxFiles: MAX_FILES,
+    accept: ATTACHMENT_TYPES,
+    maxSize: MAX_ATTACHMENT_SIZE,
+    maxFiles: MAX_ATTACHMENTS,
     onDrop: handleFiles,
     noClick: true,
     noKeyboard: true,

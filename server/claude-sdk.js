@@ -44,6 +44,7 @@ import { skillsCache } from './lib/skillsCache.js';
 import { modelsCache } from './lib/modelsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
 import { reattachUserSessions } from './lib/reattachSessions.js';
+import { handleAttachments, cleanupTempFiles } from './services/attachments/delivery.js';
 
 let modelsProbeInFlight = null;
 let modelsRefreshInFlight = false;
@@ -315,15 +316,13 @@ function waitForFirstMessage(asyncIterator, timeoutMs) {
  * Adds a session to the active sessions map
  * @param {string} sessionId - Session identifier
  * @param {Object} queryInstance - SDK query instance
- * @param {Array<string>} tempAttachmentPaths - Temp attachment file paths for cleanup
  * @param {string} tempDir - Temp directory for cleanup
  */
-function addSession(sessionId, queryInstance, tempAttachmentPaths = [], tempDir = null, writer = null) {
+function addSession(sessionId, queryInstance, tempDir = null, writer = null) {
   activeSessions.set(sessionId, {
     instance: queryInstance,
     startTime: Date.now(),
     status: 'active',
-    tempAttachmentPaths,
     tempDir,
     writer
   });
@@ -406,156 +405,6 @@ function extractTokenBudget(resultMessage, liveContext, sessionId) {
   return Object.keys(payload).length > 0 ? payload : null;
 }
 
-const SAFE_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-  '.txt', '.md', '.csv', '.pdf',
-]);
-
-const MIME_TO_EXT = {
-  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-  'image/webp': '.webp', 'image/svg+xml': '.svg',
-  'text/plain': '.txt', 'text/markdown': '.md', 'text/csv': '.csv',
-  'application/pdf': '.pdf',
-};
-
-/**
- * Sanitize an attachment filename for safe filesystem writes.
- * Strips path components, null bytes, and validates extension against allowlist.
- * Returns null if a safe filename cannot be determined -- caller must skip the attachment.
- * @param {string} rawName - Original filename from client
- * @param {string|null} mimeType - MIME type extracted from data URI (fallback for extension)
- * @returns {string|null} Safe filename, or null to skip
- */
-function safeFilename(rawName, mimeType) {
-  // Strip directory traversal and null bytes
-  let name = (rawName && typeof rawName === 'string')
-    ? path.basename(rawName).replace(/\0/g, '')
-    : '';
-
-  // Validate extension from filename
-  const ext = name ? path.extname(name).toLowerCase() : '';
-
-  if (name && name !== '.' && name !== '..' && SAFE_EXTENSIONS.has(ext)) {
-    return name;
-  }
-
-  // Filename missing or has disallowed extension -- try to derive from MIME
-  const derivedExt = mimeType ? MIME_TO_EXT[mimeType] : null;
-  if (!derivedExt) {
-    return null; // skip: cannot determine safe extension
-  }
-
-  // Build fallback name: use base of original name (without bad ext) or generic
-  const base = (name && name !== '.' && name !== '..')
-    ? path.basename(name, path.extname(name))
-    : 'file';
-  return `${base}${derivedExt}`;
-}
-
-/**
- * Handles file attachment processing for SDK queries.
- * Saves base64 attachments to temporary files and returns modified prompt with file paths.
- * @param {string} command - Original user prompt
- * @param {Array} attachments - Array of attachment objects with base64 data
- * @returns {Promise<Object>} Object with modifiedCommand, tempAttachmentPaths, tempDir
- */
-async function handleAttachments(command, attachments) {
-  const tempAttachmentPaths = [];
-  let tempDir = null;
-
-  if (!attachments || attachments.length === 0) {
-    return { modifiedCommand: command, tempAttachmentPaths, tempDir };
-  }
-
-  try {
-    await fs.mkdir(path.join(os.tmpdir(), 'claude-ui-attachments'), { recursive: true });
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-ui-attachments', path.sep));
-
-    const usedNames = new Set();
-    const resolvedTempDir = path.resolve(tempDir);
-
-    for (const [index, attachment] of attachments.entries()) {
-      const matches = attachment.data.match(/^data:([^;]+);base64,(.+)$/);
-      if (!matches) {
-        console.error('Invalid attachment data format');
-        continue;
-      }
-
-      const [, mimeType, base64Data] = matches;
-
-      // Sanitize filename -- skip if no safe name possible
-      let filename = safeFilename(attachment.name, mimeType);
-      if (!filename) {
-        console.error(`Skipping attachment: cannot determine safe filename for "${attachment.name}"`);
-        continue;
-      }
-
-      // Handle duplicate names
-      if (usedNames.has(filename)) {
-        const ext = path.extname(filename);
-        const base = path.basename(filename, ext);
-        let counter = 1;
-        while (usedNames.has(`${base}_${counter}${ext}`)) counter++;
-        filename = `${base}_${counter}${ext}`;
-      }
-      usedNames.add(filename);
-
-      const filepath = path.join(tempDir, filename);
-
-      // Path traversal guard: final check
-      if (!path.resolve(filepath).startsWith(resolvedTempDir + path.sep)) {
-        console.error(`Path traversal blocked: ${filename}`);
-        continue;
-      }
-
-      await fs.writeFile(filepath, Buffer.from(base64Data, 'base64'));
-      tempAttachmentPaths.push(filepath);
-    }
-
-    let modifiedCommand = command;
-    if (tempAttachmentPaths.length > 0 && command && command.trim()) {
-      const fileNote = `\n\n[Attached files:]\n${tempAttachmentPaths.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
-      modifiedCommand = command + fileNote;
-    }
-
-    return { modifiedCommand, tempAttachmentPaths, tempDir };
-  } catch (error) {
-    console.error('Error processing attachments for SDK:', error);
-    return { modifiedCommand: command, tempAttachmentPaths, tempDir };
-  }
-}
-
-/**
- * Cleans up temporary attachment files
- * @param {Array<string>} tempPaths - Array of temp file paths to delete
- * @param {string} tempDir - Temp directory to remove
- */
-async function cleanupTempFiles(tempPaths, tempDir) {
-  if (!tempPaths || tempPaths.length === 0) {
-    return;
-  }
-
-  try {
-    // Delete individual temp files
-    for (const filePath of tempPaths) {
-      await fs.unlink(filePath).catch(err =>
-        console.error(`Failed to delete temp file ${filePath}:`, err)
-      );
-    }
-
-    // Delete temp directory
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(err =>
-        console.error(`Failed to delete temp directory ${tempDir}:`, err)
-      );
-    }
-
-    // Temp files cleaned
-  } catch (error) {
-    console.error('Error during temp file cleanup:', error);
-  }
-}
-
 /**
  * Authoritative MCP server list for a session: ~/.claude.json (minus any wiki bypass) + CLAUDE_MCP_SERVERS.
  * @param {string} cwd - Current working directory for project-specific configs
@@ -582,7 +431,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
   const { sessionId, sessionSummary } = options;
   let capturedSessionId = sessionId;
   let sessionCreatedSent = false;
-  let tempAttachmentPaths = [];
   let tempDir = null;
 
   const emitNotification = (event) => {
@@ -613,7 +461,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const queryText = typeof finalCommand === 'string'
       ? finalCommand.replace(/\s+/g, ' ').trim()
       : null;
-    tempAttachmentPaths = attachmentResult.tempAttachmentPaths;
     tempDir = attachmentResult.tempDir;
 
     sdkOptions.hooks = {
@@ -761,7 +608,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Track the query instance for abort capability.
     // Also store on writer so abort-without-session-id can find it.
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempAttachmentPaths, tempDir, ws);
+      addSession(capturedSessionId, queryInstance, tempDir, ws);
     }
     ws._pendingQueryInstance = queryInstance;
 
@@ -825,7 +672,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       if (message.session_id && !capturedSessionId) {
         capturedSessionId = message.session_id;
         console.log(`${logPrefix} Session ID captured: ${capturedSessionId} (${Date.now() - queryStartTime}ms)`);
-        addSession(capturedSessionId, queryInstance, tempAttachmentPaths, tempDir, ws);
+        addSession(capturedSessionId, queryInstance, tempDir, ws);
 
         if (ws.userId) {
           try {
@@ -955,7 +802,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     }
 
     // Clean up temporary attachment files
-    await cleanupTempFiles(tempAttachmentPaths, tempDir);
+    await cleanupTempFiles(tempDir);
 
     // Send completion event
     console.log(`${logPrefix} Query completed (${Date.now() - queryStartTime}ms, session: ${capturedSessionId || 'none'})`);
@@ -980,7 +827,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     }
 
     // Clean up temporary attachment files on error
-    await cleanupTempFiles(tempAttachmentPaths, tempDir);
+    await cleanupTempFiles(tempDir);
 
     // Send error to WebSocket
     ws.send(createNormalizedMessage({ kind: 'error', content: error.message, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
@@ -1019,7 +866,7 @@ async function abortClaudeSDKSession(sessionId) {
     session.status = 'aborted';
 
     // Clean up temporary attachment files
-    await cleanupTempFiles(session.tempAttachmentPaths, session.tempDir);
+    await cleanupTempFiles(session.tempDir);
 
     // Clean up session
     removeSession(sessionId);
