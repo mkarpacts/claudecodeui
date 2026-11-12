@@ -261,7 +261,6 @@ export default function ChatComposer({
 
         <div
           {...getRootProps()}
-          data-drag-active={isDragActive ? 'true' : undefined}
           className={`relative overflow-hidden rounded-2xl border shadow-sm backdrop-blur-sm transition-all duration-200 ${
             isDragActive
               ? 'border-primary/60 bg-primary/10 ring-2 ring-primary/25'
