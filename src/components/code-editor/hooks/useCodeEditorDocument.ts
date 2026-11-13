@@ -55,7 +55,11 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
         const response = await api.readFile(fileProjectName, filePath);
         if (!response.ok) {
-          throw new Error(`Failed to load file: ${response.status} ${response.statusText}`);
+          const detail = await response
+            .json()
+            .then((body) => (typeof body?.error === 'string' ? body.error : null))
+            .catch(() => null);
+          throw new Error(`Failed to load file: ${detail ?? `${response.status} ${response.statusText}`}`);
         }
 
         const data = await response.json();

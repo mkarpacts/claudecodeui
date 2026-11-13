@@ -85,6 +85,7 @@ setContextWindowStore({
 import { repairSessionsMeta } from './services/sessionsRepair.js';
 import { backfillSessionsMeta } from './services/sessionsBackfill.js';
 import { createUploadAttachmentsHandler } from './services/attachments/upload.js';
+import { validateReadablePath } from './lib/readablePath.js';
 import { listProjectsLight } from './services/projectsList.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { registerClient, unregisterClient, broadcastToUser } from './lib/wsHub.js';
@@ -716,7 +717,7 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
         const { filePath } = req.query;
 
 
-        // Security: ensure the requested path is inside the project root
+        // Security: ensure the requested path is inside the project root or an allowed read folder
         if (!filePath) {
             return res.status(400).json({ error: 'Invalid file path' });
         }
@@ -726,14 +727,11 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        // Handle both absolute and relative paths
-        const resolved = path.isAbsolute(filePath)
-            ? path.resolve(filePath)
-            : path.resolve(projectRoot, filePath);
-        const normalizedRoot = path.resolve(projectRoot) + path.sep;
-        if (!resolved.startsWith(normalizedRoot)) {
-            return res.status(403).json({ error: 'Path must be under project root' });
+        const validation = await validateReadablePath(projectRoot, filePath);
+        if (!validation.valid) {
+            return res.status(validation.status).json({ error: validation.error });
         }
+        const { resolved } = validation;
 
         const content = await fsPromises.readFile(resolved, 'utf8');
         res.json({ content, path: resolved });
@@ -756,7 +754,7 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
         const { path: filePath } = req.query;
 
 
-        // Security: ensure the requested path is inside the project root
+        // Security: ensure the requested path is inside the project root or an allowed read folder
         if (!filePath) {
             return res.status(400).json({ error: 'Invalid file path' });
         }
@@ -766,9 +764,9 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        const validation = validatePathInProject(projectRoot, filePath);
+        const validation = await validateReadablePath(projectRoot, filePath);
         if (!validation.valid) {
-            return res.status(403).json({ error: validation.error });
+            return res.status(validation.status).json({ error: validation.error });
         }
         const { resolved } = validation;
 
