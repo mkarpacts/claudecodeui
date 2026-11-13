@@ -17,7 +17,7 @@ export const EMPTY_NOTICE = '_(document contained no extractable text)_';
 // Legacy binary formats we explicitly reject.
 export const LEGACY_OFFICE_EXTS = new Set(['.doc', '.xls']);
 
-// Persistent folder for the original chat-attached Office files. Override with the
+// Persistent folder for every chat attachment (all allowed formats). Override with the
 // CLAUDE_UI_INPUTS_DIR env var. The code never creates this folder: it must already
 // exist (created by hand on the server), otherwise saving fails with the fs error.
 export const DEFAULT_INPUTS_DIR = '/home/node/work/inputs';

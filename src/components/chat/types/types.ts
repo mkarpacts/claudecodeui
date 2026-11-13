@@ -5,9 +5,12 @@ export type Provider = SessionProvider;
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
 export interface ChatAttachment {
-  data: string;
   name: string;
   mimeType: string;
+  size?: number;
+  path?: string;
+  previewUrl?: string;
+  data?: string;
 }
 
 export interface ToolResult {

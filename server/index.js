@@ -84,15 +84,13 @@ setContextWindowStore({
 });
 import { repairSessionsMeta } from './services/sessionsRepair.js';
 import { backfillSessionsMeta } from './services/sessionsBackfill.js';
-import { processAttachment, decodeUploadName } from './services/attachments/index.js';
+import { createUploadAttachmentsHandler } from './services/attachments/upload.js';
 import { listProjectsLight } from './services/projectsList.js';
-import { LEGACY_OFFICE_EXTS, MAX_FILE_SIZE, MAX_ATTACHMENTS } from './services/attachments/constants.js';
 import { configureWebPush } from './services/vapid-keys.js';
 import { registerClient, unregisterClient, broadcastToUser } from './lib/wsHub.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket, requireAdmin } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { getConnectableHost } from '../shared/networkHosts.js';
-import { ATTACHMENT_EXTENSIONS, ATTACHMENT_MIME_TYPES } from '../shared/attachmentTypes.js';
 
 const VALID_PROVIDERS = ['claude', 'codex', 'cursor', 'gemini'];
 
@@ -2138,84 +2136,8 @@ Agent instructions:`;
     }
 });
 
-// File attachment upload endpoint
-app.post('/api/projects/:projectName/upload-attachments', authenticateToken, async (req, res) => {
-    try {
-        const multer = (await import('multer')).default;
-        const path = (await import('path')).default;
-        const fs = (await import('fs')).promises;
-        const os = (await import('os')).default;
-
-        // Configure multer for file uploads
-        const storage = multer.diskStorage({
-            destination: async (req, file, cb) => {
-                const uploadDir = path.join(os.tmpdir(), 'claude-ui-uploads', String(req.user.id));
-                await fs.mkdir(uploadDir, { recursive: true });
-                cb(null, uploadDir);
-            },
-            filename: (req, file, cb) => {
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-                const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-                cb(null, uniqueSuffix + '-' + sanitizedName);
-            }
-        });
-
-        const fileFilter = (req, file, cb) => {
-            const ext = path.extname(file.originalname).toLowerCase();
-            if (LEGACY_OFFICE_EXTS.has(ext)) {
-                return cb(new Error('Legacy .doc/.xls is not supported. Re-save as .docx/.xlsx.'));
-            }
-            // Accept by MIME OR extension — browser MIME for OOXML is unreliable.
-            if (ATTACHMENT_MIME_TYPES.has(file.mimetype) || ATTACHMENT_EXTENSIONS.has(ext)) {
-                return cb(null, true);
-            }
-            cb(new Error('Invalid file type. Allowed: images, txt, md, csv, pdf, docx, xlsx.'));
-        };
-
-        const upload = multer({
-            storage,
-            fileFilter,
-            limits: {
-                fileSize: MAX_FILE_SIZE, // 10MB, shared with client
-                files: MAX_ATTACHMENTS
-            }
-        });
-
-        // Handle multipart form data
-        upload.array('attachments', MAX_ATTACHMENTS)(req, res, async (err) => {
-            if (err) {
-                return res.status(400).json({ error: err.message });
-            }
-
-            if (!req.files || req.files.length === 0) {
-                return res.status(400).json({ error: 'No files provided' });
-            }
-
-            try {
-                const processedAttachments = await Promise.all(
-                    req.files.map(async (file) => {
-                        const buffer = await fs.readFile(file.path);
-                        await fs.unlink(file.path).catch(() => {});
-                        return processAttachment({
-                            buffer,
-                            name: decodeUploadName(file.originalname),
-                            mimeType: file.mimetype,
-                        });
-                    })
-                );
-
-                res.json({ attachments: processedAttachments });
-            } catch (error) {
-                console.error('Error processing attachments:', error);
-                await Promise.all(req.files.map((f) => fs.unlink(f.path).catch(() => {})));
-                res.status(400).json({ error: error.message || 'Failed to process attachments' });
-            }
-        });
-    } catch (error) {
-        console.error('Error in attachment upload endpoint:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
+// File attachment upload endpoint: files are saved to the inputs folder
+app.post('/api/projects/:projectName/upload-attachments', authenticateToken, createUploadAttachmentsHandler());
 
 // Get token usage for a specific session
 app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authenticateToken, async (req, res) => {

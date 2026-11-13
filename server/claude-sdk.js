@@ -44,7 +44,7 @@ import { skillsCache } from './lib/skillsCache.js';
 import { modelsCache } from './lib/modelsCache.js';
 import { currentSkillsVersion } from './lib/skillsVersion.js';
 import { reattachUserSessions } from './lib/reattachSessions.js';
-import { handleAttachments, cleanupTempFiles } from './services/attachments/delivery.js';
+import { handleAttachments } from './services/attachments/delivery.js';
 
 let modelsProbeInFlight = null;
 let modelsRefreshInFlight = false;
@@ -316,14 +316,13 @@ function waitForFirstMessage(asyncIterator, timeoutMs) {
  * Adds a session to the active sessions map
  * @param {string} sessionId - Session identifier
  * @param {Object} queryInstance - SDK query instance
- * @param {string} tempDir - Temp directory for cleanup
+ * @param {Object|null} writer - Writer used to reach the client
  */
-function addSession(sessionId, queryInstance, tempDir = null, writer = null) {
+function addSession(sessionId, queryInstance, writer = null) {
   activeSessions.set(sessionId, {
     instance: queryInstance,
     startTime: Date.now(),
     status: 'active',
-    tempDir,
     writer
   });
 }
@@ -431,7 +430,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
   const { sessionId, sessionSummary } = options;
   let capturedSessionId = sessionId;
   let sessionCreatedSent = false;
-  let tempDir = null;
 
   const emitNotification = (event) => {
     notifyUserIfEnabled({
@@ -455,13 +453,12 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const mcpNames = Object.keys(mcpServers);
     console.log(`${logPrefix} MCP servers loaded (${Date.now() - mcpLoadStart}ms): [${mcpNames.join(', ')}]`);
 
-    // Handle attachments - save to temp files and modify prompt
-    const attachmentResult = await handleAttachments(command, options.attachments);
-    const finalCommand = attachmentResult.modifiedCommand;
+    // Attachments are already saved in the inputs folder; validate them and list their paths in the prompt.
+    // An error here goes to the catch below (kind: 'error') before any query is created.
+    const { modifiedCommand: finalCommand } = await handleAttachments(command, options.attachments);
     const queryText = typeof finalCommand === 'string'
       ? finalCommand.replace(/\s+/g, ' ').trim()
       : null;
-    tempDir = attachmentResult.tempDir;
 
     sdkOptions.hooks = {
       Notification: [{
@@ -608,7 +605,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
     // Track the query instance for abort capability.
     // Also store on writer so abort-without-session-id can find it.
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempDir, ws);
+      addSession(capturedSessionId, queryInstance, ws);
     }
     ws._pendingQueryInstance = queryInstance;
 
@@ -672,7 +669,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       if (message.session_id && !capturedSessionId) {
         capturedSessionId = message.session_id;
         console.log(`${logPrefix} Session ID captured: ${capturedSessionId} (${Date.now() - queryStartTime}ms)`);
-        addSession(capturedSessionId, queryInstance, tempDir, ws);
+        addSession(capturedSessionId, queryInstance, ws);
 
         if (ws.userId) {
           try {
@@ -801,9 +798,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
       removeSession(capturedSessionId);
     }
 
-    // Clean up temporary attachment files
-    await cleanupTempFiles(tempDir);
-
     // Send completion event
     console.log(`${logPrefix} Query completed (${Date.now() - queryStartTime}ms, session: ${capturedSessionId || 'none'})`);
     ws.send(createNormalizedMessage({ kind: 'complete', exitCode: 0, isNewSession: !sessionId && !!command, sessionId: capturedSessionId, provider: 'claude' }));
@@ -825,9 +819,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
     if (capturedSessionId) {
       removeSession(capturedSessionId);
     }
-
-    // Clean up temporary attachment files on error
-    await cleanupTempFiles(tempDir);
 
     // Send error to WebSocket
     ws.send(createNormalizedMessage({ kind: 'error', content: error.message, sessionId: capturedSessionId || sessionId || null, provider: 'claude' }));
@@ -864,9 +855,6 @@ async function abortClaudeSDKSession(sessionId) {
 
     // Update session status
     session.status = 'aborted';
-
-    // Clean up temporary attachment files
-    await cleanupTempFiles(session.tempDir);
 
     // Clean up session
     removeSession(sessionId);

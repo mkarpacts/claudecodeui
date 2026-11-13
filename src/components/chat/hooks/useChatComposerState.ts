@@ -15,6 +15,7 @@ import { thinkingModes } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import { safeLocalStorage } from '../utils/chatStorage';
 import type {
+  ChatAttachment,
   ChatMessage,
   PendingPermissionRequest,
   PermissionMode,
@@ -521,7 +522,7 @@ export function useChatComposerState({
         messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
       }
 
-      let uploadedAttachments: unknown[] = [];
+      let uploadedAttachments: ChatAttachment[] = [];
       if (attachedFiles.length > 0) {
         const formData = new FormData();
         attachedFiles.forEach((file) => {
@@ -565,7 +566,12 @@ export function useChatComposerState({
       const userMessage: ChatMessage = {
         type: 'user',
         content: currentInput,
-        attachments: uploadedAttachments as any,
+        attachments: uploadedAttachments.map((attachment, index) => {
+          const file = attachedFiles[index];
+          return file && file.type.startsWith('image/')
+            ? { ...attachment, previewUrl: URL.createObjectURL(file) }
+            : attachment;
+        }),
         timestamp: new Date(),
       };
 
@@ -683,7 +689,7 @@ export function useChatComposerState({
             permissionMode,
             model: claudeModel,
             sessionSummary,
-            attachments: uploadedAttachments,
+            attachments: uploadedAttachments.map(({ name, path }) => ({ name, path })),
           },
         });
       }

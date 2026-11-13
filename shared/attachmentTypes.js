@@ -1,6 +1,7 @@
 /**
  * Chat attachment types and limits.
- * Single source of truth for the composer (src/), the upload endpoint (server/index.js)
+ * Single source of truth for the composer (src/), the upload endpoint (createUploadAttachmentsHandler in
+ * server/services/attachments/upload.js)
  * and the delivery of attachments to Claude (server/services/attachments/delivery.js).
  */
 

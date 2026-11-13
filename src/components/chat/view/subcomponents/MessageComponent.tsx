@@ -122,17 +122,17 @@ const MessageComponent = memo(({ message, prevMessage, createDiff, onFileOpen, o
             <CollapsibleUserText content={userCopyContent} />
             {message.attachments && message.attachments.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {message.attachments.map((attachment: any, idx: number) => {
+                {message.attachments.map((attachment, idx: number) => {
+                  const src = attachment.previewUrl ?? attachment.data;
                   const isPreviewable =
-                    attachment.mimeType?.match(/^image\/(jpeg|png|gif|webp)$/) ||
-                    attachment.data?.match(/^data:image\/(jpeg|png|gif|webp)/);
+                    src && attachment.mimeType?.match(/^image\/(jpeg|png|gif|webp)$/);
                   return isPreviewable ? (
                     <img
                       key={idx}
-                      src={attachment.data}
+                      src={src}
                       alt={attachment.name || `attachment-${idx}`}
                       className="max-h-64 cursor-pointer rounded object-contain"
-                      onClick={() => window.open(attachment.data, '_blank')}
+                      onClick={() => window.open(src, '_blank')}
                     />
                   ) : (
                     <div
