@@ -20,21 +20,16 @@ export async function validateReadablePath(projectRoot, targetPath, extraRoots =
   for (const root of extraRoots) {
     if (!isInside(resolved, path.resolve(root))) continue;
 
-    let realRoot;
-    try {
-      realRoot = await fs.realpath(root);
-    } catch {
-      continue;
-    }
+    // A missing or unreadable root is simply not an allowed folder on this machine
+    const realRoot = await fs.realpath(root).catch(() => null);
+    if (!realRoot) continue;
 
-    let real;
-    try {
-      real = await fs.realpath(resolved);
-    } catch (err) {
-      if (err.code === 'ENOENT') {
-        return { valid: false, status: 404, error: 'File not found' };
-      }
+    const real = await fs.realpath(resolved).catch((err) => {
+      if (err.code === 'ENOENT') return null;
       throw err;
+    });
+    if (!real) {
+      return { valid: false, status: 404, error: 'File not found' };
     }
 
     if (isInside(real, realRoot)) {

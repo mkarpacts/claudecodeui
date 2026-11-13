@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../utils/api';
+import { readResponseError } from '../../../utils/responseError';
 import { saveBlob } from '../../../utils/saveBlob';
 import type { CodeEditorFile } from '../types/types';
 import { isBinaryFile } from '../utils/binaryFile';
@@ -55,10 +56,7 @@ export const useCodeEditorDocument = ({ file, projectPath }: UseCodeEditorDocume
 
         const response = await api.readFile(fileProjectName, filePath);
         if (!response.ok) {
-          const detail = await response
-            .json()
-            .then((body) => (typeof body?.error === 'string' ? body.error : null))
-            .catch(() => null);
+          const detail = await readResponseError(response);
           throw new Error(`Failed to load file: ${detail ?? `${response.status} ${response.statusText}`}`);
         }
 

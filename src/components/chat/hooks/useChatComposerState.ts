@@ -11,6 +11,7 @@ import type {
 } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { authenticatedFetch } from '../../../utils/api';
+import { readResponseError } from '../../../utils/responseError';
 import { thinkingModes } from '../constants/thinkingModes';
 import { grantClaudeToolPermission } from '../utils/chatPermissions';
 import { safeLocalStorage } from '../utils/chatStorage';
@@ -536,12 +537,7 @@ export function useChatComposerState({
           );
 
           if (!response.ok) {
-            // Server error paths respond with { error: string }; non-JSON
-            // bodies (e.g. nginx 413 HTML page) fall back to the status only.
-            const detail = await response
-              .json()
-              .then((body) => (typeof body?.error === 'string' ? body.error : null))
-              .catch(() => null);
+            const detail = await readResponseError(response);
             throw new Error(detail ? `${detail} (HTTP ${response.status})` : `HTTP ${response.status}`);
           }
 
